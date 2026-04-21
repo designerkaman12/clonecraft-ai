@@ -2,10 +2,11 @@
 import { useStore } from '@/lib/store';
 import axios from 'axios';
 import type { ColorPalette } from '@/lib/types';
+import { generateImageWithPolling } from '@/lib/imageGen';
 import {
   Link2, PencilLine, Package, Settings2, Palette,
-  Sparkles, Loader2, AlertCircle, ChevronDown, Globe,
-  LayoutGrid, Ratio, AlignLeft, Languages, ImageIcon
+  Sparkles, Loader2, AlertCircle, Globe,
+  Ratio, AlignLeft, Languages, ImageIcon
 } from 'lucide-react';
 
 const PALETTES: { name: string; colors: ColorPalette; hex: string }[] = [
@@ -101,15 +102,13 @@ export default function LeftPanel() {
         const { updateImageSlot } = useStore.getState();
         updateImageSlot(slot.id, { status: 'generating' });
         try {
-          const imgRes = await axios.post('/api/generate-image', {
-            prompt: slot.prompt, aspectRatio: inputs.aspectRatio, slotId: slot.id,
-          });
-          if (imgRes.data.success) {
-            updateImageSlot(slot.id, { status: 'done', imageUrl: imgRes.data.data.imageUrl });
-            setSelectedSlotId(slot.id);
-          } else {
-            updateImageSlot(slot.id, { status: 'error', errorMessage: imgRes.data.error });
-          }
+          const imageUrl = await generateImageWithPolling(
+            slot.prompt,
+            inputs.aspectRatio || '1:1',
+            slot.id
+          );
+          updateImageSlot(slot.id, { status: 'done', imageUrl });
+          setSelectedSlotId(slot.id);
         } catch (e: any) {
           updateImageSlot(slot.id, { status: 'error', errorMessage: e.message });
         }

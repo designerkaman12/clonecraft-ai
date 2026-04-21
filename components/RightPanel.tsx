@@ -4,6 +4,7 @@ import { useStore } from '@/lib/store';
 import axios from 'axios';
 import JSZip from 'jszip';
 import PromptEditor from './PromptEditor';
+import { generateImageWithPolling } from '@/lib/imageGen';
 import {
   ImageIcon, Download, PenLine, RefreshCw, Package2,
   AlertTriangle, Loader2, CheckCircle2, Eye
@@ -26,12 +27,12 @@ export default function RightPanel() {
       : slot.prompt;
     updateImageSlot(slotId, { status: 'generating', imageUrl: undefined });
     try {
-      const res = await axios.post('/api/generate-image', { prompt: promptToUse, aspectRatio: inputs.aspectRatio, slotId });
-      if (res.data.success) {
-        updateImageSlot(slotId, { status: 'done', imageUrl: res.data.data.imageUrl });
-      } else {
-        updateImageSlot(slotId, { status: 'error', errorMessage: res.data.error });
-      }
+      const imageUrl = await generateImageWithPolling(
+        promptToUse,
+        inputs.aspectRatio || '1:1',
+        slotId
+      );
+      updateImageSlot(slotId, { status: 'done', imageUrl });
     } catch (e: any) {
       updateImageSlot(slotId, { status: 'error', errorMessage: e.message });
     }
