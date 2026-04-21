@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: clonecraft-ai
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: KIE_API_KEY
+        sync: false
+      - key: KIE_API_BASE_URL
+        value: https://api.kie.ai
+      - key: APIFY_API_TOKEN
+        sync: false
