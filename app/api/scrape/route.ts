@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { kieChat } from '@/lib/kieClient';
 import type { ProductData } from '@/lib/types';
 
-// Scrapes product data from Amazon/Flipkart using Apify or falls back to LLM extraction
 export async function POST(req: NextRequest) {
   try {
     const { url, type } = await req.json();
@@ -17,43 +16,88 @@ export async function POST(req: NextRequest) {
         const data = await scrapeWithApify(url, apifyToken);
         return NextResponse.json({ success: true, data });
       } catch (e) {
-        console.log('Apify failed, falling back to LLM extraction');
+        console.log('Apify failed, falling back to fetch+LLM extraction');
       }
     }
 
-    // LLM-based extraction from URL (works as general extractor)
-    const extractionPrompt = `You are a product data extraction assistant. Given the following ${type === 'reference' ? 'REFERENCE' : 'OWN'} product URL from an ecommerce platform, extract as much product information as possible using your training data or make intelligent inferences.
+    // ── Step 1: Try to actually fetch the page HTML ──────────────────────────
+    let pageText = '';
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Cache-Control': 'no-cache',
+          'Referer': 'https://www.google.com/',
+        },
+        // 10 second timeout
+        signal: AbortSignal.timeout(10000),
+      });
 
-Product URL: ${url}
+      if (res.ok) {
+        const html = await res.text();
+        // Extract meaningful text from HTML — title + meta + visible text
+        pageText = extractTextFromHtml(html);
+        console.log(`[scrape] Fetched ${url} — extracted ${pageText.length} chars`);
+      }
+    } catch (fetchErr) {
+      console.log(`[scrape] Page fetch failed: ${fetchErr} — falling back to URL-only inference`);
+    }
 
-Return a JSON object with this EXACT structure (fill with realistic product data based on URL hints):
+    // ── Step 2: LLM extraction (with real page text if available) ─────────────
+    const hasRealData = pageText.length > 200;
+    const extractionPrompt = hasRealData
+      ? `You are a product data extraction assistant. Extract product information from this ${type === 'reference' ? 'REFERENCE' : 'OWN PRODUCT'} listing page content.
+
+URL: ${url}
+
+PAGE CONTENT (first 3000 chars):
+${pageText.substring(0, 3000)}
+
+Extract the ACTUAL product details from the page content above. Do NOT guess or hallucinate — use only what is present in the page content.
+
+Return ONLY this JSON:
 {
-  "title": "Full product title",
-  "bullets": ["Feature bullet 1", "Feature bullet 2", "Feature bullet 3", "Feature bullet 4", "Feature bullet 5"],
-  "features": ["Feature 1", "Feature 2"],
-  "specs": {"weight": "...", "dimensions": "...", "material": "..."},
-  "benefits": ["Benefit 1", "Benefit 2"],
-  "usageInstructions": ["Step 1", "Step 2"],
-  "material": "...",
-  "size": "...",
-  "packagingDetails": "...",
+  "title": "exact product title from page",
+  "bullets": ["bullet 1", "bullet 2", "bullet 3", "bullet 4", "bullet 5"],
+  "features": ["feature 1", "feature 2"],
+  "specs": {},
+  "benefits": ["benefit 1", "benefit 2"],
+  "usageInstructions": [],
   "imageUrls": [],
-  "price": "...",
-  "category": "..."
-}
+  "price": "price if visible",
+  "category": "product category"
+}`
+      : `You are a product data extraction assistant. The URL below is from an ecommerce platform. Extract product details based on the URL slug/ASIN.
 
-If URL is an Amazon/Flipkart URL, infer product type from the URL slug and generate relevant product info. Only return valid JSON, nothing else.`;
+IMPORTANT: This is a ${type === 'reference' ? 'REFERENCE listing (for design inspiration only)' : 'OWN PRODUCT listing'}.
+URL: ${url}
+
+Look carefully at the URL slug for product clues (e.g. "wireless-earbuds", "car-polisher", etc.).
+
+Return ONLY this JSON:
+{
+  "title": "product title inferred from URL",
+  "bullets": ["feature 1", "feature 2", "feature 3"],
+  "features": [],
+  "specs": {},
+  "benefits": [],
+  "usageInstructions": [],
+  "imageUrls": [],
+  "price": "",
+  "category": "category inferred from URL"
+}`;
 
     const result = await kieChat([{ role: 'user', content: extractionPrompt }]);
 
     let productData: ProductData;
     try {
-      // Extract JSON from response
       const jsonMatch = result.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('No JSON found');
       productData = JSON.parse(jsonMatch[0]);
     } catch {
-      // Fallback minimal structure
       productData = {
         title: 'Product from ' + new URL(url).hostname,
         bullets: [],
@@ -65,10 +109,34 @@ If URL is an Amazon/Flipkart URL, infer product type from the URL slug and gener
       };
     }
 
+    console.log(`[scrape] Extracted product: "${productData.title}" (${type})`);
     return NextResponse.json({ success: true, data: productData });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
+}
+
+/**
+ * Extract readable text from HTML — strips tags, scripts, styles
+ * Returns cleaned product-relevant text
+ */
+function extractTextFromHtml(html: string): string {
+  return html
+    // Remove scripts and styles completely
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    // Remove HTML tags
+    .replace(/<[^>]+>/g, ' ')
+    // Decode common HTML entities
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function scrapeWithApify(url: string, token: string): Promise<ProductData> {
@@ -82,7 +150,6 @@ async function scrapeWithApify(url: string, token: string): Promise<ProductData>
   const runData = await runRes.json();
   const runId = runData.data.id;
 
-  // Wait for run to finish
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
