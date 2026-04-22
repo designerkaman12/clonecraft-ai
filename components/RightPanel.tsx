@@ -1,13 +1,14 @@
 'use client';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useStore } from '@/lib/store';
 import axios from 'axios';
 import JSZip from 'jszip';
 import PromptEditor from './PromptEditor';
 import { generateImageWithPolling } from '@/lib/imageGen';
+import type { OverlayConfig } from '@/lib/types';
 import {
   ImageIcon, Download, PenLine, RefreshCw, Package2,
-  AlertTriangle, Loader2, CheckCircle2, Eye
+  AlertTriangle, Loader2, CheckCircle2, Eye, Layers, LayersIcon
 } from 'lucide-react';
 
 export default function RightPanel() {
@@ -15,9 +16,159 @@ export default function RightPanel() {
   const { imageSlots, inputs, generatedContent, currentStep } = session;
   const selectedSlot = imageSlots.find(s => s.id === selectedSlotId) || null;
 
-  const [showPromptEditor, setShowPromptEditor] = useState(false);
-  const [regenerateReason, setRegenerateReason]   = useState('');
+  const [showPromptEditor, setShowPromptEditor]       = useState(false);
+  const [regenerateReason, setRegenerateReason]       = useState('');
   const [showRegenerateInput, setShowRegenerateInput] = useState(false);
+  const [showOverlay, setShowOverlay]                 = useState(true);
+  const [overlayRendering, setOverlayRendering]       = useState(false);
+
+  // ── Canvas overlay compositor ────────────────────────────────────────────────
+  const compositeImageWithOverlay = useCallback(async (
+    imageUrl: string,
+    overlay: OverlayConfig
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const canvas  = document.createElement('canvas');
+      const ctx     = canvas.getContext('2d')!;
+      const img     = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        canvas.width  = img.naturalWidth  || 1024;
+        canvas.height = img.naturalHeight || 1024;
+        ctx.drawImage(img, 0, 0);
+
+        const W = canvas.width;
+        const H = canvas.height;
+        const pos = overlay.overlayPosition || 'bottom';
+        const isTop = pos === 'top';
+        const isLeft = pos === 'left';
+        const isRight = pos === 'right';
+        const panelH = Math.round(H * 0.30);
+
+        // Gradient overlay bar
+        let grd: CanvasGradient;
+        if (isTop) {
+          grd = ctx.createLinearGradient(0, 0, 0, panelH);
+          grd.addColorStop(0, 'rgba(0,0,0,0.75)');
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, 0, W, panelH);
+        } else if (isLeft) {
+          grd = ctx.createLinearGradient(0, 0, W * 0.45, 0);
+          grd.addColorStop(0, 'rgba(0,0,0,0.78)');
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, 0, W * 0.45, H);
+        } else if (isRight) {
+          grd = ctx.createLinearGradient(W, 0, W * 0.55, 0);
+          grd.addColorStop(0, 'rgba(0,0,0,0.78)');
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(W * 0.55, 0, W, H);
+        } else {
+          // bottom (default)
+          grd = ctx.createLinearGradient(0, H - panelH, 0, H);
+          grd.addColorStop(0, 'rgba(0,0,0,0)');
+          grd.addColorStop(1, 'rgba(0,0,0,0.82)');
+          ctx.fillStyle = grd;
+          ctx.fillRect(0, H - panelH, W, panelH);
+        }
+
+        // Text positioning
+        const textX = isRight ? W * 0.58 : isLeft ? W * 0.04 : W * 0.05;
+        let textY   = isTop ? H * 0.06 : isLeft || isRight ? H * 0.30 : H - panelH + H * 0.04;
+        const maxTW = isLeft || isRight ? W * 0.38 : W * 0.88;
+        const scale = W / 1024;
+
+        // Badge
+        if (overlay.badge) {
+          const bFontSize = Math.round(18 * scale);
+          ctx.font        = `700 ${bFontSize}px 'Arial', sans-serif`;
+          const bPad      = Math.round(8 * scale);
+          const bW        = ctx.measureText(overlay.badge).width + bPad * 2.5;
+          const bH        = bFontSize + bPad * 1.4;
+          const bX        = isRight ? W - bW - Math.round(16 * scale) : Math.round(16 * scale);
+          const bY        = isTop ? Math.round(16 * scale) : H - bH - Math.round(16 * scale);
+          ctx.fillStyle   = '#f59e0b';
+          ctx.beginPath();
+          ctx.roundRect(bX, bY, bW, bH, Math.round(6 * scale));
+          ctx.fill();
+          ctx.fillStyle = '#000';
+          ctx.fillText(overlay.badge, bX + bPad, bY + bH - bPad * 0.9);
+        }
+
+        // Headline
+        const hFontSize = Math.round(44 * scale);
+        ctx.font        = `800 ${hFontSize}px 'Arial Black', 'Arial', sans-serif`;
+        ctx.fillStyle   = overlay.textColor || '#ffffff';
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur  = Math.round(8 * scale);
+        const headline  = overlay.headline || '';
+        // Wrap long headline
+        const hWords    = headline.split(' ');
+        let hLine       = '';
+        for (const w of hWords) {
+          const test = hLine ? hLine + ' ' + w : w;
+          if (ctx.measureText(test).width > maxTW && hLine) {
+            ctx.fillText(hLine, textX, textY + hFontSize);
+            textY += hFontSize * 1.15;
+            hLine = w;
+          } else { hLine = test; }
+        }
+        ctx.fillText(hLine, textX, textY + hFontSize);
+        textY += hFontSize * 1.3;
+
+        // Subline
+        if (overlay.subline) {
+          const sFontSize = Math.round(26 * scale);
+          ctx.font        = `400 ${sFontSize}px 'Arial', sans-serif`;
+          ctx.fillStyle   = 'rgba(255,255,255,0.82)';
+          ctx.shadowBlur  = Math.round(4 * scale);
+          ctx.fillText(overlay.subline.substring(0, 60), textX, textY + sFontSize);
+          textY += sFontSize * 1.5;
+        }
+
+        // Bullets (checkmarks)
+        if (overlay.bullets && overlay.bullets.length > 0) {
+          const bFontSize = Math.round(21 * scale);
+          ctx.font        = `600 ${bFontSize}px 'Arial', sans-serif`;
+          ctx.fillStyle   = '#ffffff';
+          ctx.shadowBlur  = Math.round(3 * scale);
+          for (const bullet of overlay.bullets.slice(0, 3)) {
+            const line = `✓ ${bullet}`;
+            ctx.fillText(line.substring(0, 45), textX, textY + bFontSize);
+            textY += bFontSize * 1.45;
+          }
+        }
+
+        ctx.shadowBlur = 0;
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => reject(new Error('Image load failed'));
+      img.src = imageUrl;
+    });
+  }, []);
+
+  const handleDownloadWithOverlay = async () => {
+    if (!selectedSlot?.imageUrl) return;
+    setOverlayRendering(true);
+    try {
+      let dataUrl: string;
+      if (showOverlay && selectedSlot.overlayConfig) {
+        dataUrl = await compositeImageWithOverlay(selectedSlot.imageUrl, selectedSlot.overlayConfig);
+      } else {
+        const res  = await fetch(selectedSlot.imageUrl);
+        const blob = await res.blob();
+        dataUrl    = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); });
+      }
+      const a      = document.createElement('a');
+      a.href       = dataUrl;
+      a.download   = `${selectedSlot.type}_${inputs.productName || 'image'}.png`;
+      a.click();
+    } finally {
+      setOverlayRendering(false);
+    }
+  };
 
   const handleRegenerate = async (slotId: string, customPrompt?: string) => {
     const slot = imageSlots.find(s => s.id === slotId);
@@ -40,21 +191,7 @@ export default function RightPanel() {
     setRegenerateReason('');
   };
 
-  const handleDownloadSingle = async () => {
-    if (!selectedSlot?.imageUrl) return;
-    try {
-      const res = await fetch(selectedSlot.imageUrl);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${selectedSlot.type}_${inputs.productName || 'image'}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert('Could not download. Try right-click → Save image.');
-    }
-  };
+  const handleDownloadSingle = handleDownloadWithOverlay;
 
   const handleExport = async () => {
     const doneSlots = imageSlots.filter(s => s.status === 'done' && s.imageUrl);
@@ -144,7 +281,7 @@ export default function RightPanel() {
             </div>
           )}
 
-          {/* Image */}
+          {/* Image with optional overlay preview */}
           {selectedSlot?.imageUrl && selectedSlot.status === 'done' && (
             <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 28px rgba(0,0,0,0.12), 0 0 0 1px var(--border)', margin: 16 }}>
               <img
@@ -153,15 +290,85 @@ export default function RightPanel() {
                 id={`preview-image-${selectedSlot.id}`}
                 style={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 280px)', objectFit: 'contain' }}
               />
-              {/* Floating buttons on image */}
+
+              {/* Text Overlay Preview — CSS-based live preview */}
+              {showOverlay && selectedSlot.overlayConfig && (() => {
+                const ov   = selectedSlot.overlayConfig!;
+                const pos  = ov.overlayPosition || 'bottom';
+                const isTop = pos === 'top';
+                const overlayStyle: React.CSSProperties = {
+                  position: 'absolute',
+                  left: pos === 'right' ? 'auto' : 0,
+                  right: pos === 'right' ? 0 : 'auto',
+                  top: isTop ? 0 : 'auto',
+                  bottom: isTop ? 'auto' : 0,
+                  width: pos === 'left' || pos === 'right' ? '45%' : '100%',
+                  height: isTop ? '35%' : pos === 'left' || pos === 'right' ? '100%' : '38%',
+                  background: pos === 'left'
+                    ? 'linear-gradient(to right, rgba(0,0,0,0.82), transparent)'
+                    : pos === 'right'
+                    ? 'linear-gradient(to left, rgba(0,0,0,0.82), transparent)'
+                    : isTop
+                    ? 'linear-gradient(to bottom, rgba(0,0,0,0.78), transparent)'
+                    : 'linear-gradient(to top, rgba(0,0,0,0.84), transparent)',
+                  padding: '16px 18px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: isTop ? 'flex-start' : 'flex-end',
+                  pointerEvents: 'none',
+                };
+                return (
+                  <div style={overlayStyle}>
+                    {ov.badge && (
+                      <span style={{
+                        alignSelf: 'flex-start', background: '#f59e0b', color: '#000',
+                        fontSize: 9, fontWeight: 800, padding: '2px 6px',
+                        borderRadius: 4, marginBottom: 5, letterSpacing: 0.5,
+                      }}>{ov.badge}</span>
+                    )}
+                    <div style={{ fontSize: 13, fontWeight: 800, color: '#fff', lineHeight: 1.25, textShadow: '0 1px 4px rgba(0,0,0,0.7)', marginBottom: 3 }}>
+                      {ov.headline}
+                    </div>
+                    {ov.subline && (
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.82)', marginBottom: 4, textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>
+                        {ov.subline}
+                      </div>
+                    )}
+                    {ov.bullets && ov.bullets.slice(0, 3).map((b, i) => (
+                      <div key={i} style={{ fontSize: 9.5, color: '#fff', fontWeight: 600, textShadow: '0 1px 2px rgba(0,0,0,0.7)', marginBottom: 2 }}>
+                        ✓ {b}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Floating action buttons */}
               <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 5 }}>
+                {/* Overlay toggle */}
+                {selectedSlot.overlayConfig && (
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => setShowOverlay(v => !v)}
+                    data-tooltip={showOverlay ? 'Hide overlay' : 'Show overlay'}
+                    style={{
+                      background: showOverlay ? 'rgba(99,102,241,0.92)' : 'rgba(255,255,255,0.92)',
+                      border: '1px solid var(--border)', backdropFilter: 'blur(6px)',
+                      color: showOverlay ? '#fff' : 'var(--text-primary)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                    }}
+                  >
+                    <Layers size={13} />
+                  </button>
+                )}
                 <button
                   className="btn btn-sm"
                   onClick={handleDownloadSingle}
+                  disabled={overlayRendering}
                   data-tooltip="Download"
                   style={{ background: 'rgba(255,255,255,0.92)', border: '1px solid var(--border)', backdropFilter: 'blur(6px)', color: 'var(--text-primary)', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
                 >
-                  <Download size={13} />
+                  {overlayRendering ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
                 </button>
                 <button
                   className="btn btn-sm"

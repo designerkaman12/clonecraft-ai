@@ -1,12 +1,13 @@
 'use client';
 import { useStore } from '@/lib/store';
 import axios from 'axios';
+import { useState, useRef } from 'react';
 import type { ColorPalette, ImageSlot } from '@/lib/types';
 import { generateImageWithPolling } from '@/lib/imageGen';
 import {
   Link2, PencilLine, Package, Settings2, Palette,
   Sparkles, Loader2, AlertCircle, Globe,
-  Ratio, AlignLeft, Languages, ImageIcon
+  Ratio, AlignLeft, Languages, ImageIcon, Upload, X
 } from 'lucide-react';
 
 const PALETTES: { name: string; colors: ColorPalette; hex: string }[] = [
@@ -32,6 +33,46 @@ export default function LeftPanel() {
   } = useStore();
 
   const { inputs } = session;
+
+  // Product image upload state
+  const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
+  const [productImageUrl, setProductImageUrl]         = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage]           = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleProductImageUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) { alert('Please upload an image file.'); return; }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target?.result as string;
+      setProductImagePreview(base64);
+      setUploadingImage(true);
+      try {
+        const res = await axios.post('/api/upload-image', {
+          base64Data: base64,
+          fileName: file.name,
+        });
+        if (res.data.success) {
+          setProductImageUrl(res.data.imageUrl);
+          console.log('[upload] Product image hosted at:', res.data.imageUrl);
+        } else {
+          console.warn('[upload] Failed:', res.data.error);
+          // Still use base64 preview, generation will be text-to-image
+        }
+      } catch (err) {
+        console.warn('[upload] Upload error, will use text-to-image fallback');
+      } finally {
+        setUploadingImage(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearProductImage = () => {
+    setProductImagePreview(null);
+    setProductImageUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const handleGenerate = async () => {
     try {
@@ -110,7 +151,9 @@ export default function LeftPanel() {
             const imageUrl = await generateImageWithPolling(
               slot.prompt,
               inputs.aspectRatio || '1:1',
-              slot.id
+              slot.id,
+              undefined,
+              productImageUrl || undefined   // ← pass product reference image
             );
             useStore.getState().updateImageSlot(slot.id, { status: 'done', imageUrl });
             // Auto-select first completed image
@@ -179,6 +222,83 @@ export default function LeftPanel() {
             placeholder="e.g. Vitamin C Serum 30ml"
             value={inputs.productName}
             onChange={e => setProductName(e.target.value)}
+          />
+        </div>
+
+        {/* PRODUCT IMAGE UPLOAD */}
+        <div className="form-group">
+          <label className="form-label">
+            <Upload size={10} style={{ display: 'inline', marginRight: 4 }} />
+            Upload Product Image
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 4 }}>(for consistent product)</span>
+          </label>
+
+          {productImagePreview ? (
+            <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+              <img
+                src={productImagePreview}
+                alt="Product"
+                style={{
+                  width: '100%', height: 100, objectFit: 'contain',
+                  borderRadius: 8, border: '1.5px solid var(--border)',
+                  background: '#f8f9fb',
+                }}
+              />
+              <button
+                onClick={clearProductImage}
+                style={{
+                  position: 'absolute', top: 4, right: 4,
+                  background: '#ef4444', border: 'none', borderRadius: '50%',
+                  width: 20, height: 20, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', cursor: 'pointer', color: '#fff',
+                }}
+              >
+                <X size={11} />
+              </button>
+              {uploadingImage && (
+                <div style={{
+                  position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.8)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 8, fontSize: 11, color: 'var(--text-muted)',
+                }}>
+                  <Loader2 size={14} className="spin" style={{ marginRight: 4 }} /> Uploading...
+                </div>
+              )}
+              {productImageUrl && !uploadingImage && (
+                <div style={{
+                  fontSize: 9, color: '#16a34a', marginTop: 3, textAlign: 'center',
+                }}>
+                  ✓ Image ready — AI will use your actual product
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: '2px dashed var(--border)', borderRadius: 8,
+                padding: '12px 8px', textAlign: 'center', cursor: 'pointer',
+                color: 'var(--text-muted)', fontSize: 11,
+                transition: 'border-color 0.2s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+            >
+              <ImageIcon size={16} style={{ marginBottom: 4, opacity: 0.5 }} />
+              <div>Click to upload your product photo</div>
+              <div style={{ fontSize: 9, marginTop: 2 }}>PNG, JPG, WEBP · Max 5MB</div>
+            </div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleProductImageUpload(file);
+            }}
           />
         </div>
 

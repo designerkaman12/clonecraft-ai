@@ -60,6 +60,15 @@ export interface GeneratedContent {
   tagline: string;
 }
 
+export interface OverlayConfig {
+  headline: string;       // Bold top/bottom headline
+  subline?: string;       // Smaller supporting line
+  bullets?: string[];     // Feature checkmarks (max 3)
+  badge?: string;         // Corner badge e.g. "NEW" | "BEST SELLER"
+  textColor?: string;     // Defaults to white or black based on bg
+  overlayPosition?: 'bottom' | 'top' | 'left' | 'right'; // Where text sits
+}
+
 export interface ImageSlot {
   id: string;
   index: number;
@@ -70,6 +79,7 @@ export interface ImageSlot {
   imageBase64?: string;
   status: 'pending' | 'generating' | 'done' | 'error';
   errorMessage?: string;
+  overlayConfig?: OverlayConfig;
 }
 
 export interface SessionInputs {
@@ -90,6 +100,8 @@ export interface SessionInputs {
   fontPreference?: string;
   uploadedImages: File[];
   logoFile?: File;
+  productImageBase64?: string;  // Uploaded product image for image-to-image gen
+  productImageUrl?: string;     // kie.ai hosted URL after upload
 }
 
 export interface GenerationSession {
