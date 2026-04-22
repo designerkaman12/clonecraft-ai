@@ -1,7 +1,7 @@
 'use client';
 import { useStore } from '@/lib/store';
 import axios from 'axios';
-import type { ColorPalette } from '@/lib/types';
+import type { ColorPalette, ImageSlot } from '@/lib/types';
 import { generateImageWithPolling } from '@/lib/imageGen';
 import {
   Link2, PencilLine, Package, Settings2, Palette,
@@ -99,13 +99,13 @@ export default function LeftPanel() {
       setSelectedSlotId(slots[0]?.id || null);
 
       // Mark all as generating immediately (parallel)
-      slots.forEach(slot => {
+      slots.forEach((slot: ImageSlot) => {
         useStore.getState().updateImageSlot(slot.id, { status: 'generating' });
       });
 
       // Generate all images in parallel — much faster than sequential
       await Promise.allSettled(
-        slots.map(async (slot) => {
+        slots.map(async (slot: ImageSlot) => {
           try {
             const imageUrl = await generateImageWithPolling(
               slot.prompt,
