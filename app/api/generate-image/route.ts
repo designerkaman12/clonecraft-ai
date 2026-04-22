@@ -8,20 +8,18 @@ const kieHeaders = () => ({
   'Content-Type': 'application/json',
 });
 
-export const maxDuration = 300; // 5 min (only works on Vercel Pro — on Render we use /start + /poll split)
+export const maxDuration = 300;
 
-// POST /api/generate-image        → starts generation, returns { taskId }
-// POST /api/generate-image?poll=1 → polls taskId, returns { done, imageUrl?, error? }
+/**
+ * POST /api/generate-image        → starts generation, returns { taskId }
+ * POST /api/generate-image?poll=1 → polls taskId, returns { done, imageUrl?, error? }
+ */
 export async function POST(req: NextRequest) {
   const isPoll = req.nextUrl.searchParams.get('poll') === '1';
-
-  if (isPoll) {
-    return handlePoll(req);
-  }
-  return handleStart(req);
+  return isPoll ? handlePoll(req) : handleStart(req);
 }
 
-// ─── Step 1: Start generation ────────────────────────────────
+// ─── Step 1: Start generation ─────────────────────────────────────────────────
 async function handleStart(req: NextRequest) {
   try {
     const { prompt, aspectRatio, slotId } = await req.json();
@@ -33,25 +31,29 @@ async function handleStart(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'KIE_API_KEY not configured' }, { status: 500 });
     }
 
-    const finalPrompt = `${prompt.trim()}\n\nPhotography requirements: Professional ecommerce product photography, razor sharp focus, commercial studio quality, no text artifacts, no watermarks, suitable for Amazon/Flipkart listing image.`;
+    // Keep prompt short — long prompts can cause failures
+    const trimmed = prompt.trim().substring(0, 500);
+    const finalPrompt = `${trimmed}. Professional product photography, clean background, high quality.`;
 
     console.log(`[generate-image] START slot=${slotId} ratio=${aspectRatio}`);
 
-    const res = await fetch(`${KIE_BASE}/api/v1/gpt4o-image/generate`, {
+    const res = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
       method: 'POST',
       headers: kieHeaders(),
       body: JSON.stringify({
-        prompt: finalPrompt,
-        size: aspectRatio || '1:1',
-        isEnhance: false,
-        uploadCn: false,
-        enableFallback: false,
+        model: 'flux-2/flex-text-to-image',
+        input: {
+          prompt: finalPrompt,
+          aspect_ratio: aspectRatio || '1:1',
+          resolution: '1K',
+          nsfw_checker: false,
+        },
       }),
     });
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`kie generate ${res.status}: ${err}`);
+      throw new Error(`kie Flux-2 generate ${res.status}: ${err}`);
     }
 
     const data = await res.json();
@@ -71,14 +73,14 @@ async function handleStart(req: NextRequest) {
   }
 }
 
-// ─── Step 2: Poll task status ─────────────────────────────────
+// ─── Step 2: Poll task status ──────────────────────────────────────────────────
 async function handlePoll(req: NextRequest) {
   try {
     const { taskId, slotId } = await req.json();
     if (!taskId) return NextResponse.json({ success: false, error: 'taskId required' }, { status: 400 });
 
     const res = await fetch(
-      `${KIE_BASE}/api/v1/gpt4o-image/record-info?taskId=${taskId}`,
+      `${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${taskId}`,
       { headers: kieHeaders() }
     );
 
@@ -87,32 +89,32 @@ async function handlePoll(req: NextRequest) {
     }
 
     const data = await res.json();
-    const record = data.data;
-    const status: string = record?.status ?? '';
-    const progress: string = record?.progress ?? '0';
+    const record = data?.data ?? {};
+    const state: string = (record?.state ?? '').toLowerCase();
 
-    console.log(`[poll] taskId=${taskId} status=${status} progress=${progress}`);
+    console.log(`[poll] taskId=${taskId} state=${state}`);
 
-    if (status === 'SUCCESS' || record?.successFlag === 1) {
-      const urls: string[] = record?.response?.resultUrls ?? [];
-      if (urls.length > 0) {
-        return NextResponse.json({ success: true, done: true, imageUrl: urls[0], slotId });
+    if (state === 'success') {
+      let resultUrls: string[] = [];
+      try {
+        resultUrls = JSON.parse(record?.resultJson || '{}')?.resultUrls ?? [];
+      } catch { /* */ }
+
+      if (resultUrls.length > 0) {
+        return NextResponse.json({ success: true, done: true, imageUrl: resultUrls[0], slotId });
       }
       return NextResponse.json({ success: false, done: true, error: 'No result URLs in response' });
     }
 
-    if (status === 'FAILED' || status === 'ERROR') {
+    if (state === 'fail' || state === 'failed' || state === 'error') {
       return NextResponse.json({
         success: false, done: true,
-        error: record?.errorMessage || `Task failed with status: ${status}`
+        error: record?.failMsg || `Task failed with state: ${state}`
       });
     }
 
     // Still running
-    return NextResponse.json({
-      success: true, done: false,
-      status, progress, slotId
-    });
+    return NextResponse.json({ success: true, done: false, status: state, slotId });
 
   } catch (error: any) {
     console.error('[generate-image] poll error:', error?.message);

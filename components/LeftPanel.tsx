@@ -98,21 +98,31 @@ export default function LeftPanel() {
       setActivePanel('right');
       setSelectedSlotId(slots[0]?.id || null);
 
-      for (const slot of slots) {
-        const { updateImageSlot } = useStore.getState();
-        updateImageSlot(slot.id, { status: 'generating' });
-        try {
-          const imageUrl = await generateImageWithPolling(
-            slot.prompt,
-            inputs.aspectRatio || '1:1',
-            slot.id
-          );
-          updateImageSlot(slot.id, { status: 'done', imageUrl });
-          setSelectedSlotId(slot.id);
-        } catch (e: any) {
-          updateImageSlot(slot.id, { status: 'error', errorMessage: e.message });
-        }
-      }
+      // Mark all as generating immediately (parallel)
+      slots.forEach(slot => {
+        useStore.getState().updateImageSlot(slot.id, { status: 'generating' });
+      });
+
+      // Generate all images in parallel — much faster than sequential
+      await Promise.allSettled(
+        slots.map(async (slot) => {
+          try {
+            const imageUrl = await generateImageWithPolling(
+              slot.prompt,
+              inputs.aspectRatio || '1:1',
+              slot.id
+            );
+            useStore.getState().updateImageSlot(slot.id, { status: 'done', imageUrl });
+            // Auto-select first completed image
+            const current = useStore.getState().selectedSlotId;
+            if (!current || useStore.getState().session.imageSlots.find(s => s.id === current)?.status !== 'done') {
+              useStore.getState().setSelectedSlotId(slot.id);
+            }
+          } catch (e: any) {
+            useStore.getState().updateImageSlot(slot.id, { status: 'error', errorMessage: e.message });
+          }
+        })
+      );
       setCurrentStep('complete');
     } catch (err: any) {
       setError(err.message || 'Generation failed');
