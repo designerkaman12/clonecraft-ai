@@ -21,6 +21,7 @@ export default function RightPanel() {
   const [showRegenerateInput, setShowRegenerateInput] = useState(false);
   const [showOverlay, setShowOverlay]                 = useState(true);
   const [overlayRendering, setOverlayRendering]       = useState(false);
+  const [compositedUrls, setCompositedUrls]           = useState<Record<string, string>>({});
   const compositing = useRef<Set<string>>(new Set());
 
   // ── Amazon-style Canvas Compositor ──────────────────────────────────────────
@@ -74,58 +75,41 @@ export default function RightPanel() {
         let textZoneX: number, textZoneY: number, textZoneW: number, textZoneH: number;
 
         if (isHero) {
-          // Hero: product fills right 60%, text top-left
-          pW = SIZE * 0.62; pH = SIZE * 0.62;
-          pX = SIZE - pW - MARGIN * 0.5; pY = (SIZE - pH) / 2;
-          textZoneX = MARGIN; textZoneY = MARGIN;
-          textZoneW = SIZE * 0.44; textZoneH = SIZE - MARGIN * 2;
-        } else if (isFeature || isHowTo) {
-          // Feature: product right 50%, text left 42%
-          pW = SIZE * 0.52; pH = SIZE * 0.52;
-          pX = SIZE * 0.46; pY = (SIZE - pH) / 2;
+          // Hero: product fills right 65%, text top-left — product DOMINANT
+          pW = SIZE * 0.65; pH = SIZE * 0.65;
+          pX = SIZE - pW - MARGIN * 0.3; pY = (SIZE - pH) / 2;
           textZoneX = MARGIN; textZoneY = MARGIN;
           textZoneW = SIZE * 0.40; textZoneH = SIZE - MARGIN * 2;
+        } else if (isFeature || isHowTo) {
+          // Feature: product right 56%, text left 36% — product clearly visible
+          pW = SIZE * 0.56; pH = SIZE * 0.56;
+          pX = SIZE * 0.42; pY = (SIZE - pH) / 2;
+          textZoneX = MARGIN; textZoneY = MARGIN;
+          textZoneW = SIZE * 0.36; textZoneH = SIZE - MARGIN * 2;
         } else if (isCreative) {
-          // Creative: product center-right, text top-left, diagonal stripe bottom
-          pW = SIZE * 0.58; pH = SIZE * 0.58;
-          pX = SIZE * 0.38; pY = SIZE * 0.08;
+          // Creative: product center-right large, text top-left
+          pW = SIZE * 0.62; pH = SIZE * 0.62;
+          pX = SIZE * 0.35; pY = (SIZE - pH) / 2;
           textZoneX = MARGIN; textZoneY = MARGIN;
-          textZoneW = SIZE * 0.38; textZoneH = SIZE * 0.70;
+          textZoneW = SIZE * 0.36; textZoneH = SIZE - MARGIN * 2;
         } else if (isBefore) {
-          // Before/After: product center, text top only
-          pW = SIZE * 0.60; pH = SIZE * 0.52;
-          pX = (SIZE - pW) / 2; pY = SIZE * 0.32;
+          // Before/After: product center-bottom, large, text top only
+          pW = SIZE * 0.62; pH = SIZE * 0.50;
+          pX = (SIZE - pW) / 2; pY = SIZE * 0.38;
           textZoneX = MARGIN; textZoneY = MARGIN;
-          textZoneW = SIZE - MARGIN * 2; textZoneH = SIZE * 0.28;
+          textZoneW = SIZE - MARGIN * 2; textZoneH = SIZE * 0.34;
         } else {
-          // Default (specs etc): product right, text left
-          pW = SIZE * 0.50; pH = SIZE * 0.50;
-          pX = SIZE * 0.48; pY = (SIZE - pH) / 2;
+          // Default: product right large, text left
+          pW = SIZE * 0.54; pH = SIZE * 0.54;
+          pX = SIZE * 0.44; pY = (SIZE - pH) / 2;
           textZoneX = MARGIN; textZoneY = MARGIN;
-          textZoneW = SIZE * 0.42; textZoneH = SIZE - MARGIN * 2;
+          textZoneW = SIZE * 0.38; textZoneH = SIZE - MARGIN * 2;
         }
 
-        // Creative layout — diagonal black-red stripe at bottom
+        // Creative layout — subtle bottom accent line only (no random shapes)
         if (isCreative) {
-          ctx.save();
-          ctx.fillStyle = '#111111';
-          ctx.beginPath();
-          ctx.moveTo(0, SIZE * 0.80);
-          ctx.lineTo(SIZE * 0.52, SIZE * 0.72);
-          ctx.lineTo(SIZE, SIZE * 0.72);
-          ctx.lineTo(SIZE, SIZE);
-          ctx.lineTo(0, SIZE);
-          ctx.closePath();
-          ctx.fill();
           ctx.fillStyle = '#e02020';
-          ctx.beginPath();
-          ctx.moveTo(0, SIZE * 0.78);
-          ctx.lineTo(SIZE * 0.52, SIZE * 0.70);
-          ctx.lineTo(SIZE * 0.52, SIZE * 0.72);
-          ctx.lineTo(0, SIZE * 0.80);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
+          ctx.fillRect(0, SIZE - 5, SIZE, 5);
         }
 
         // ── 3. Product drop shadow (drawn BEFORE product) ─────────────────────────
@@ -180,35 +164,38 @@ export default function RightPanel() {
         const splitIdx = Math.ceil(words.length / 2);
         const line1 = words.slice(0, splitIdx).join(' ');
         const line2 = words.slice(splitIdx).join(' ');
-        const hFont = Math.round(isHero ? 68 * sc : 60 * sc);
+        const hFont = Math.round(isHero ? 52 * sc : 46 * sc);
 
         if (ty + hFont < maxY) {
           ctx.font        = `900 ${hFont}px Arial Black, Arial, sans-serif`;
           ctx.shadowColor = 'rgba(0,0,0,0.06)';
           ctx.shadowBlur  = 3;
           ctx.fillStyle   = '#111111';
-          // Word-wrap line1 if too wide
           const wrappedLine1 = wrapText(ctx, line1, tmW);
           for (const wl of wrappedLine1) {
             if (ty + hFont > maxY) break;
             ctx.fillText(wl, tx, ty + hFont);
-            ty += hFont * 1.05;
+            ty += hFont * 1.1;
           }
           if (line2 && ty + hFont < maxY) {
             ctx.fillStyle = '#e02020';
-            ctx.fillText(line2, tx, ty + hFont, tmW);
-            ty += hFont * 1.05;
+            const wrappedLine2 = wrapText(ctx, line2, tmW);
+            for (const wl of wrappedLine2) {
+              if (ty + hFont > maxY) break;
+              ctx.fillText(wl, tx, ty + hFont);
+              ty += hFont * 1.1;
+            }
           }
           ctx.shadowBlur = 0;
         }
 
         // ── Red underline ─────────────────────────────────────────────────────────
         if (ty + 12 * sc < maxY) {
-          ctx.font = `900 ${Math.round(isHero ? 68 * sc : 60 * sc)}px Arial Black, Arial, sans-serif`;
-          const underW = Math.min(ctx.measureText(line1).width, tmW * 0.72);
+          ctx.font = `900 ${Math.round(isHero ? 52 * sc : 46 * sc)}px Arial Black, Arial, sans-serif`;
+          const underW = Math.min(ctx.measureText(line1).width, tmW * 0.80);
           ctx.fillStyle = '#e02020';
           ctx.fillRect(tx, ty + Math.round(6 * sc), underW, Math.round(4 * sc));
-          ty += Math.round(24 * sc);
+          ty += Math.round(22 * sc);
         }
 
         // ── Subline ───────────────────────────────────────────────────────────────
@@ -311,22 +298,11 @@ export default function RightPanel() {
     if (!selectedSlot?.imageUrl) return;
     setOverlayRendering(true);
     try {
-      let dataUrl: string;
-      if (selectedSlot.overlayConfig) {
-        dataUrl = await compositeImageWithOverlay(
-          selectedSlot.imageUrl,
-          selectedSlot.overlayConfig,
-          selectedSlot.type
-        );
-      } else {
-        dataUrl = selectedSlot.imageUrl.startsWith('data:')
-          ? selectedSlot.imageUrl
-          : await (async () => {
-              const res  = await fetch(selectedSlot.imageUrl!);
-              const blob = await res.blob();
-              return await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); });
-            })();
-      }
+      // Use already-composited URL if available, otherwise composite now
+      const dataUrl = compositedUrls[selectedSlot.id]
+        || (selectedSlot.overlayConfig
+          ? await compositeImageWithOverlay(selectedSlot.imageUrl, selectedSlot.overlayConfig, selectedSlot.type)
+          : selectedSlot.imageUrl);
       const a = document.createElement('a');
       a.href = dataUrl;
       a.download = `${selectedSlot.type}_${inputs.productName || 'image'}.png`;
@@ -336,7 +312,9 @@ export default function RightPanel() {
     }
   };
 
-  // ── Auto-composite: runs Canvas when slot is done, updates preview ──────────
+  // ── Auto-composite: runs Canvas ONCE per slot, stores in local state ────────
+  // CRITICAL: stores in compositedUrls (NOT imageUrl) to prevent double-composite.
+  // imageUrl always stays as the raw product photo.
   useEffect(() => {
     const slotsToComposite = imageSlots.filter(
       (s) => s.status === 'done' && s.imageUrl && s.overlayConfig && !compositing.current.has(s.id)
@@ -349,15 +327,15 @@ export default function RightPanel() {
           slot.overlayConfig!,
           slot.type
         );
-        // Replace the raw imageUrl with the fully composited creative
-        updateImageSlot(slot.id, { imageUrl: composited });
-        console.log(`[RightPanel] Auto-composited slot=${slot.id}`);
+        // Store in local state — NEVER replaces imageUrl (prevents double-composite)
+        setCompositedUrls(prev => ({ ...prev, [slot.id]: composited }));
+        console.log(`[RightPanel] Composited slot=${slot.id}`);
       } catch (e) {
-        console.warn(`[RightPanel] Composite failed for slot=${slot.id}:`, e);
-        compositing.current.delete(slot.id);
+        console.warn(`[RightPanel] Composite failed slot=${slot.id}:`, e);
+        compositing.current.delete(slot.id); // allow retry
       }
     });
-  }, [imageSlots, compositeImageWithOverlay, updateImageSlot]);
+  }, [imageSlots, compositeImageWithOverlay]);
 
 
   const handleRegenerate = async (slotId: string, customPrompt?: string) => {
@@ -394,21 +372,19 @@ export default function RightPanel() {
       for (let i = 0; i < doneSlots.length; i++) {
         const slot = doneSlots[i];
         try {
-          // Always export the composited version (product + text overlay baked in)
-          let dataUrl: string;
-          if (slot.overlayConfig) {
+          // Use pre-composited URL if ready, otherwise composite now (single pass only)
+          let dataUrl = compositedUrls[slot.id];
+          if (!dataUrl && slot.overlayConfig) {
             dataUrl = await compositeImageWithOverlay(slot.imageUrl!, slot.overlayConfig, slot.type);
-          } else {
-            dataUrl = slot.imageUrl!;
           }
-          // Convert data URL to blob
-          const arr = dataUrl.split(',');
+          if (!dataUrl) dataUrl = slot.imageUrl!;
+          // data URL → blob
+          const arr  = dataUrl.split(',');
           const mime = arr[0].match(/:(.*?);/)![1];
           const bstr = atob(arr[1]);
-          const n = bstr.length;
-          const u8arr = new Uint8Array(n);
-          for (let j = 0; j < n; j++) u8arr[j] = bstr.charCodeAt(j);
-          folder.file(`image_0${i + 1}_${slot.type}.png`, new Blob([u8arr], { type: mime }));
+          const u8   = new Uint8Array(bstr.length);
+          for (let j = 0; j < bstr.length; j++) u8[j] = bstr.charCodeAt(j);
+          folder.file(`image_0${i + 1}_${slot.type}.png`, new Blob([u8], { type: mime }));
         } catch {}
       }
       const prompts: Record<string, string> = {};
@@ -488,64 +464,23 @@ export default function RightPanel() {
           {selectedSlot?.imageUrl && selectedSlot.status === 'done' && (
             <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 28px rgba(0,0,0,0.12), 0 0 0 1px var(--border)', margin: 16 }}>
               <img
-                src={selectedSlot.imageUrl}
+                src={compositedUrls[selectedSlot.id] || selectedSlot.imageUrl}
                 alt={selectedSlot.title}
                 id={`preview-image-${selectedSlot.id}`}
                 style={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 280px)', objectFit: 'contain' }}
               />
 
-              {/* Amazon-style text overlay preview (CSS-based, matches Canvas output) */}
-              {showOverlay && selectedSlot.overlayConfig && (() => {
-                const ov = selectedSlot.overlayConfig!;
-                const words = (ov.headline || '').toUpperCase().split(' ');
-                const splitIdx = Math.ceil(words.length / 2);
-                const line1 = words.slice(0, splitIdx).join(' ');
-                const line2 = words.slice(splitIdx).join(' ');
-                return (
-                  <div style={{
-                    position: 'absolute', inset: 0, padding: '14px 16px',
-                    display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
-                    pointerEvents: 'none', background: 'transparent',
-                  }}>
-                    {ov.badge && (
-                      <span style={{
-                        alignSelf: 'flex-start', background: '#e02020', color: '#fff',
-                        fontSize: 8, fontWeight: 900, padding: '2px 7px',
-                        borderRadius: 3, marginBottom: 6, letterSpacing: 0.8,
-                      }}>{ov.badge}</span>
-                    )}
-                    {/* Headline: black + red */}
-                    <div style={{ lineHeight: 1.1, marginBottom: 4 }}>
-                      <div style={{ fontSize: 16, fontWeight: 900, color: '#111', textTransform: 'uppercase', letterSpacing: -0.3 }}>{line1}</div>
-                      {line2 && <div style={{ fontSize: 16, fontWeight: 900, color: '#e02020', textTransform: 'uppercase', letterSpacing: -0.3 }}>{line2}</div>}
-                    </div>
-                    {/* Red underline */}
-                    <div style={{ width: 40, height: 2.5, background: '#e02020', marginBottom: 6 }} />
-                    {ov.subline && (
-                      <div style={{ fontSize: 9, color: '#444', marginBottom: 8 }}>{ov.subline}</div>
-                    )}
-                    {/* Feature bullets with red circle icons */}
-                    {ov.bullets && ov.bullets.slice(0, 3).map((b, i) => {
-                      const parts = b.split(':');
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 5, marginBottom: 5 }}>
-                          <div style={{
-                            width: 14, height: 14, borderRadius: '50%', border: '1.5px solid #e02020',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            flexShrink: 0, marginTop: 1,
-                          }}>
-                            <span style={{ fontSize: 7, color: '#e02020', fontWeight: 900 }}>✓</span>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 8.5, fontWeight: 800, color: '#111' }}>{parts[0]}</div>
-                            {parts[1] && <div style={{ fontSize: 7.5, color: '#555', marginTop: 1 }}>{parts[1].trim()}</div>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
+              {/* Compositing indicator */}
+              {selectedSlot.overlayConfig && !compositedUrls[selectedSlot.id] && (
+                <div style={{
+                  position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 12, fontSize: 12, color: '#666', gap: 6,
+                }}>
+                  <Loader2 size={14} style={{ animation: 'spin 0.7s linear infinite' }} />
+                  Compositing layout…
+                </div>
+              )}
 
               {/* Floating action buttons */}
               <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 5 }}>
