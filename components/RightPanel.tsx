@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useStore } from '@/lib/store';
 import axios from 'axios';
 import JSZip from 'jszip';
@@ -21,6 +21,7 @@ export default function RightPanel() {
   const [showRegenerateInput, setShowRegenerateInput] = useState(false);
   const [showOverlay, setShowOverlay]                 = useState(true);
   const [overlayRendering, setOverlayRendering]       = useState(false);
+  const compositing = useRef<Set<string>>(new Set());
 
   // ── Amazon-style Canvas Compositor ──────────────────────────────────────────
   // Matches the professional layout from sample images:
@@ -231,14 +232,12 @@ export default function RightPanel() {
     try {
       let dataUrl: string;
       if (selectedSlot.overlayConfig) {
-        // Always bake text into the download — matches Amazon listing quality
         dataUrl = await compositeImageWithOverlay(
           selectedSlot.imageUrl,
           selectedSlot.overlayConfig,
           selectedSlot.type
         );
       } else {
-        // No overlay config — just download the raw image
         dataUrl = selectedSlot.imageUrl.startsWith('data:')
           ? selectedSlot.imageUrl
           : await (async () => {
@@ -247,14 +246,38 @@ export default function RightPanel() {
               return await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); });
             })();
       }
-      const a      = document.createElement('a');
-      a.href       = dataUrl;
-      a.download   = `${selectedSlot.type}_${inputs.productName || 'image'}.png`;
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${selectedSlot.type}_${inputs.productName || 'image'}.png`;
       a.click();
     } finally {
       setOverlayRendering(false);
     }
   };
+
+  // ── Auto-composite: runs Canvas when slot is done, updates preview ──────────
+  useEffect(() => {
+    const slotsToComposite = imageSlots.filter(
+      (s) => s.status === 'done' && s.imageUrl && s.overlayConfig && !compositing.current.has(s.id)
+    );
+    slotsToComposite.forEach(async (slot) => {
+      compositing.current.add(slot.id);
+      try {
+        const composited = await compositeImageWithOverlay(
+          slot.imageUrl!,
+          slot.overlayConfig!,
+          slot.type
+        );
+        // Replace the raw imageUrl with the fully composited creative
+        updateImageSlot(slot.id, { imageUrl: composited });
+        console.log(`[RightPanel] Auto-composited slot=${slot.id}`);
+      } catch (e) {
+        console.warn(`[RightPanel] Composite failed for slot=${slot.id}:`, e);
+        compositing.current.delete(slot.id);
+      }
+    });
+  }, [imageSlots, compositeImageWithOverlay, updateImageSlot]);
+
 
   const handleRegenerate = async (slotId: string, customPrompt?: string) => {
     const slot = imageSlots.find(s => s.id === slotId);
@@ -290,8 +313,21 @@ export default function RightPanel() {
       for (let i = 0; i < doneSlots.length; i++) {
         const slot = doneSlots[i];
         try {
-          const imgRes = await fetch(slot.imageUrl!);
-          folder.file(`image_0${i + 1}_${slot.type}.png`, await imgRes.blob());
+          // Always export the composited version (product + text overlay baked in)
+          let dataUrl: string;
+          if (slot.overlayConfig) {
+            dataUrl = await compositeImageWithOverlay(slot.imageUrl!, slot.overlayConfig, slot.type);
+          } else {
+            dataUrl = slot.imageUrl!;
+          }
+          // Convert data URL to blob
+          const arr = dataUrl.split(',');
+          const mime = arr[0].match(/:(.*?);/)![1];
+          const bstr = atob(arr[1]);
+          const n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          for (let j = 0; j < n; j++) u8arr[j] = bstr.charCodeAt(j);
+          folder.file(`image_0${i + 1}_${slot.type}.png`, new Blob([u8arr], { type: mime }));
         } catch {}
       }
       const prompts: Record<string, string> = {};

@@ -1,37 +1,44 @@
 /**
- * imageGen.ts — Image generation via Gemini (through /api/generate-image)
+ * imageGen.ts — Image generation client
  *
- * When productImageBase64 is provided:
- *   → Gemini multimodal mode: uses the ACTUAL product photo as reference
- *   → Ensures the generated creative shows the real product, not a random one
+ * KEY LOGIC:
+ * - If productImageBase64 is provided (user uploaded their product photo):
+ *     → Return it DIRECTLY without any API call
+ *     → The Canvas compositor in RightPanel handles text/layout overlay
+ *     → This guarantees the user's actual product is ALWAYS used
  *
- * When no product image:
- *   → Standard text-to-image generation
+ * - If no product image:
+ *     → Call /api/generate-image (Gemini text-to-image)
  */
 
-// ─── Public entry point ───────────────────────────────────────────────────────
 export async function generateImageWithPolling(
   prompt: string,
   aspectRatio = '1:1',
   slotId: string,
   onProgress?: (pct: number, status: string) => void,
-  productImageBase64?: string   // ← base64 data URL of uploaded product image
+  productImageBase64?: string   // base64 data URL of uploaded product photo
 ): Promise<string> {
 
-  const finalPrompt = prompt.trim().substring(0, 1800);
+  // ── FAST PATH: User uploaded their product photo ──────────────────────────
+  // Return it immediately — no API call, no random AI generation
+  // The Canvas compositor in RightPanel.tsx will overlay text on top
+  if (productImageBase64) {
+    console.log(`[imageGen] Using uploaded product image directly for slot=${slotId}`);
+    onProgress?.(100, 'success');
+    return productImageBase64;
+  }
 
-  console.log(`[imageGen] slotId=${slotId} ratio=${aspectRatio} hasProductImage=${!!productImageBase64}`);
-
+  // ── FALLBACK: No product image → Gemini text-to-image ─────────────────────
+  console.log(`[imageGen] No product image, calling Gemini for slot=${slotId}`);
   onProgress?.(10, 'generating');
 
   const res = await fetch('/api/generate-image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      prompt: finalPrompt,
+      prompt: prompt.trim().substring(0, 1800),
       aspectRatio,
       slotId,
-      productImageBase64: productImageBase64 || null,  // pass to route for multimodal
     }),
   });
 
@@ -53,7 +60,7 @@ export async function generateImageWithPolling(
   }
 
   onProgress?.(100, 'success');
-  console.log(`[imageGen] Done! slotId=${slotId}`);
+  console.log(`[imageGen] Gemini done! slotId=${slotId}`);
 
   return data.imageUrl;
 }
