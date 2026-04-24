@@ -24,8 +24,13 @@ export default function RightPanel() {
   const compositing = useRef<Set<string>>(new Set());
 
   // ── Amazon-style Canvas Compositor ──────────────────────────────────────────
-  // Matches the professional layout from sample images:
-  // Bold BLACK headline + RED accent word, red underline, feature icons, product right
+  // ── Amazon-style Canvas Compositor ──────────────────────────────────────────
+  // Architecture:
+  //   1. Draw background (white/gradient)
+  //   2. Drop product image with multiply blend → removes white bg
+  //   3. Add product drop shadow for natural composite look
+  //   4. Render text in SAFE ZONE that never overlaps product zone
+  //   5. All text is rendered by Canvas (not AI) → no distortion
   const compositeImageWithOverlay = useCallback(async (
     imageUrl: string,
     overlay: OverlayConfig,
@@ -33,6 +38,7 @@ export default function RightPanel() {
   ): Promise<string> => {
     return new Promise((resolve, reject) => {
       const SIZE = 1024;
+      const MARGIN = Math.round(SIZE * 0.08); // 8% safe margin from all edges
       const canvas = document.createElement('canvas');
       canvas.width  = SIZE;
       canvas.height = SIZE;
@@ -41,168 +47,219 @@ export default function RightPanel() {
       img.crossOrigin = 'anonymous';
 
       img.onload = () => {
-        // ── Background ──────────────────────────────────────────────────────────
+        // ── 1. Background ────────────────────────────────────────────────────────
+        // Clean white base — Amazon standard
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, SIZE, SIZE);
 
-        const pos  = overlay.overlayPosition || 'top';
-        const isHero     = slotType === 'hero';
-        const isFeature  = slotType === 'feature' || slotType === 'how_to_use' || slotType === 'uses';
-        const isCreative = slotType === 'creative_1' || slotType === 'creative_2';
+        // Subtle light gray vignette in corners for premium feel
+        const vigGrd = ctx.createRadialGradient(SIZE/2, SIZE/2, SIZE*0.35, SIZE/2, SIZE/2, SIZE*0.72);
+        vigGrd.addColorStop(0, 'rgba(255,255,255,0)');
+        vigGrd.addColorStop(1, 'rgba(235,235,240,0.4)');
+        ctx.fillStyle = vigGrd;
+        ctx.fillRect(0, 0, SIZE, SIZE);
 
-        // ── Product image placement ──────────────────────────────────────────────
+        // ── 2. Layout zones (text zone LEFT, product zone RIGHT for most) ────────
+        // Text safe zone:  x: MARGIN → textZoneEnd, y: MARGIN → SIZE-MARGIN
+        // Product zone:    x: productX → SIZE-MARGIN, y: productY → SIZE-MARGIN
+        // These NEVER overlap.
+        const isHero     = slotType === 'hero';
+        const isFeature  = slotType === 'feature' || slotType === 'uses';
+        const isHowTo    = slotType === 'how_to_use';
+        const isCreative = slotType === 'creative_1' || slotType === 'creative_2';
+        const isBefore   = slotType === 'before_after';
+
+        // Determine product placement & text zone for each layout
+        let pX: number, pY: number, pW: number, pH: number;
+        let textZoneX: number, textZoneY: number, textZoneW: number, textZoneH: number;
+
         if (isHero) {
-          // Hero: product centered, slightly right, large
-          const pSize = SIZE * 0.72;
-          const pX    = SIZE * 0.28;
-          const pY    = SIZE * 0.14;
-          drawProductImage(ctx, img, pX, pY, pSize, pSize);
-        } else if (isFeature || slotType === 'before_after') {
-          // Feature: product on right half
-          const pSize = SIZE * 0.54;
-          const pX    = SIZE * 0.44;
-          const pY    = SIZE * 0.20;
-          drawProductImage(ctx, img, pX, pY, pSize, pSize);
+          // Hero: product fills right 60%, text top-left
+          pW = SIZE * 0.62; pH = SIZE * 0.62;
+          pX = SIZE - pW - MARGIN * 0.5; pY = (SIZE - pH) / 2;
+          textZoneX = MARGIN; textZoneY = MARGIN;
+          textZoneW = SIZE * 0.44; textZoneH = SIZE - MARGIN * 2;
+        } else if (isFeature || isHowTo) {
+          // Feature: product right 50%, text left 42%
+          pW = SIZE * 0.52; pH = SIZE * 0.52;
+          pX = SIZE * 0.46; pY = (SIZE - pH) / 2;
+          textZoneX = MARGIN; textZoneY = MARGIN;
+          textZoneW = SIZE * 0.40; textZoneH = SIZE - MARGIN * 2;
         } else if (isCreative) {
-          // Creative: full bleed with diagonal bottom stripe
-          const pSize = SIZE * 0.65;
-          const pX    = SIZE * 0.32;
-          const pY    = SIZE * 0.08;
-          drawProductImage(ctx, img, pX, pY, pSize, pSize);
-          // Diagonal red-black stripe bottom
+          // Creative: product center-right, text top-left, diagonal stripe bottom
+          pW = SIZE * 0.58; pH = SIZE * 0.58;
+          pX = SIZE * 0.38; pY = SIZE * 0.08;
+          textZoneX = MARGIN; textZoneY = MARGIN;
+          textZoneW = SIZE * 0.38; textZoneH = SIZE * 0.70;
+        } else if (isBefore) {
+          // Before/After: product center, text top only
+          pW = SIZE * 0.60; pH = SIZE * 0.52;
+          pX = (SIZE - pW) / 2; pY = SIZE * 0.32;
+          textZoneX = MARGIN; textZoneY = MARGIN;
+          textZoneW = SIZE - MARGIN * 2; textZoneH = SIZE * 0.28;
+        } else {
+          // Default (specs etc): product right, text left
+          pW = SIZE * 0.50; pH = SIZE * 0.50;
+          pX = SIZE * 0.48; pY = (SIZE - pH) / 2;
+          textZoneX = MARGIN; textZoneY = MARGIN;
+          textZoneW = SIZE * 0.42; textZoneH = SIZE - MARGIN * 2;
+        }
+
+        // Creative layout — diagonal black-red stripe at bottom
+        if (isCreative) {
           ctx.save();
           ctx.fillStyle = '#111111';
           ctx.beginPath();
-          ctx.moveTo(0, SIZE * 0.82);
-          ctx.lineTo(SIZE * 0.55, SIZE * 0.74);
-          ctx.lineTo(SIZE, SIZE * 0.74);
+          ctx.moveTo(0, SIZE * 0.80);
+          ctx.lineTo(SIZE * 0.52, SIZE * 0.72);
+          ctx.lineTo(SIZE, SIZE * 0.72);
           ctx.lineTo(SIZE, SIZE);
           ctx.lineTo(0, SIZE);
           ctx.closePath();
           ctx.fill();
           ctx.fillStyle = '#e02020';
           ctx.beginPath();
-          ctx.moveTo(0, SIZE * 0.80);
-          ctx.lineTo(SIZE * 0.55, SIZE * 0.72);
-          ctx.lineTo(SIZE * 0.55, SIZE * 0.74);
-          ctx.lineTo(0, SIZE * 0.82);
+          ctx.moveTo(0, SIZE * 0.78);
+          ctx.lineTo(SIZE * 0.52, SIZE * 0.70);
+          ctx.lineTo(SIZE * 0.52, SIZE * 0.72);
+          ctx.lineTo(0, SIZE * 0.80);
           ctx.closePath();
           ctx.fill();
           ctx.restore();
-        } else {
-          // Default: product right
-          const pSize = SIZE * 0.56;
-          const pX    = SIZE * 0.42;
-          const pY    = SIZE * 0.18;
-          drawProductImage(ctx, img, pX, pY, pSize, pSize);
         }
 
-        // ── Text area (left side for most layouts, top for hero) ────────────────
-        const textStartX = isHero ? SIZE * 0.04 : SIZE * 0.04;
-        const textStartY = isHero ? SIZE * 0.06 : SIZE * 0.08;
-        const textMaxW   = isHero ? SIZE * 0.56 : SIZE * 0.44;
-        let y = textStartY;
-        const sc = SIZE / 1024;
+        // ── 3. Product drop shadow (drawn BEFORE product) ─────────────────────────
+        // Soft elliptical shadow beneath product
+        const shadowGrd = ctx.createRadialGradient(
+          pX + pW/2, pY + pH * 0.92,
+          0,
+          pX + pW/2, pY + pH * 0.92,
+          pW * 0.38
+        );
+        shadowGrd.addColorStop(0, 'rgba(0,0,0,0.18)');
+        shadowGrd.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = shadowGrd;
+        ctx.beginPath();
+        ctx.ellipse(pX + pW/2, pY + pH * 0.94, pW * 0.38, pH * 0.08, 0, 0, Math.PI * 2);
+        ctx.fill();
 
-        // ── Badge (if any) ───────────────────────────────────────────────────────
-        if (overlay.badge) {
-          const bFont = Math.round(16 * sc);
+        // ── 4. Product image — multiply blend removes white background ────────────
+        // multiply blend: white (255,255,255) × canvas_color = canvas_color (invisible)
+        // Non-white product pixels are preserved exactly as uploaded
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        drawProductFitted(ctx, img, pX, pY, pW, pH);
+        ctx.restore();
+
+        // ── 5. Text rendering in SAFE ZONE (never overlaps product) ──────────────
+        const sc = SIZE / 1024;
+        let ty = textZoneY;
+        const tx = textZoneX;
+        const tmW = textZoneW;
+        const maxY = textZoneY + textZoneH;
+
+        // ── Badge ─────────────────────────────────────────────────────────────────
+        if (overlay.badge && ty + 30 * sc < maxY) {
+          const bFont = Math.round(15 * sc);
           ctx.font    = `800 ${bFont}px Arial, sans-serif`;
-          const bPad  = Math.round(7 * sc);
+          const bPad  = Math.round(6 * sc);
           const bW    = ctx.measureText(overlay.badge).width + bPad * 3;
-          const bH    = bFont + bPad * 1.6;
+          const bH    = bFont + bPad * 1.8;
           ctx.fillStyle = '#e02020';
           ctx.beginPath();
-          ctx.roundRect(textStartX, y, bW, bH, 4);
+          ctx.roundRect(tx, ty, bW, bH, Math.round(3 * sc));
           ctx.fill();
-          ctx.fillStyle = '#fff';
-          ctx.fillText(overlay.badge, textStartX + bPad, y + bH - bPad * 0.7);
-          y += bH + Math.round(12 * sc);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(overlay.badge, tx + bPad, ty + bH - bPad * 0.6);
+          ty += bH + Math.round(14 * sc);
         }
 
-        // ── Headline: split into BLACK + RED (second line/word accent) ──────────
+        // ── Headline: Line 1 BLACK, Line 2 RED ───────────────────────────────────
         const headline = (overlay.headline || '').toUpperCase();
-        const words    = headline.split(' ');
-        // First ~half = black, second ~half = red (matches sample: SAVE SPACE & / STAY ORGANIZED)
-        const splitIdx   = Math.ceil(words.length / 2);
-        const line1Words = words.slice(0, splitIdx);
-        const line2Words = words.slice(splitIdx);
-        const hFont      = Math.round(72 * sc);
-        ctx.font         = `900 ${hFont}px Arial Black, Arial, sans-serif`;
-        ctx.shadowColor  = 'rgba(0,0,0,0.08)';
-        ctx.shadowBlur   = 4;
+        const words = headline.split(' ');
+        const splitIdx = Math.ceil(words.length / 2);
+        const line1 = words.slice(0, splitIdx).join(' ');
+        const line2 = words.slice(splitIdx).join(' ');
+        const hFont = Math.round(isHero ? 68 * sc : 60 * sc);
 
-        // Line 1: Black
-        ctx.fillStyle = '#111111';
-        const line1 = line1Words.join(' ');
-        ctx.fillText(line1, textStartX, y + hFont, textMaxW);
-        y += hFont * 1.05;
+        if (ty + hFont < maxY) {
+          ctx.font        = `900 ${hFont}px Arial Black, Arial, sans-serif`;
+          ctx.shadowColor = 'rgba(0,0,0,0.06)';
+          ctx.shadowBlur  = 3;
+          ctx.fillStyle   = '#111111';
+          // Word-wrap line1 if too wide
+          const wrappedLine1 = wrapText(ctx, line1, tmW);
+          for (const wl of wrappedLine1) {
+            if (ty + hFont > maxY) break;
+            ctx.fillText(wl, tx, ty + hFont);
+            ty += hFont * 1.05;
+          }
+          if (line2 && ty + hFont < maxY) {
+            ctx.fillStyle = '#e02020';
+            ctx.fillText(line2, tx, ty + hFont, tmW);
+            ty += hFont * 1.05;
+          }
+          ctx.shadowBlur = 0;
+        }
 
-        // Line 2: Red (accent)
-        if (line2Words.length > 0) {
+        // ── Red underline ─────────────────────────────────────────────────────────
+        if (ty + 12 * sc < maxY) {
+          ctx.font = `900 ${Math.round(isHero ? 68 * sc : 60 * sc)}px Arial Black, Arial, sans-serif`;
+          const underW = Math.min(ctx.measureText(line1).width, tmW * 0.72);
           ctx.fillStyle = '#e02020';
-          const line2 = line2Words.join(' ');
-          ctx.fillText(line2, textStartX, y + hFont, textMaxW);
-          y += hFont * 1.0;
+          ctx.fillRect(tx, ty + Math.round(6 * sc), underW, Math.round(4 * sc));
+          ty += Math.round(24 * sc);
         }
-        ctx.shadowBlur = 0;
 
-        // ── Red underline separator ─────────────────────────────────────────────
-        const lineW = Math.min(ctx.measureText(line1).width, textMaxW * 0.7);
-        ctx.fillStyle = '#e02020';
-        ctx.fillRect(textStartX, y + Math.round(8 * sc), lineW, Math.round(4 * sc));
-        y += Math.round(28 * sc);
-
-        // ── Subline ─────────────────────────────────────────────────────────────
-        if (overlay.subline) {
-          const sFont = Math.round(28 * sc);
-          ctx.font    = `400 ${sFont}px Arial, sans-serif`;
+        // ── Subline ───────────────────────────────────────────────────────────────
+        if (overlay.subline && ty + 30 * sc < maxY) {
+          const sFont = Math.round(24 * sc);
+          ctx.font      = `400 ${sFont}px Arial, sans-serif`;
           ctx.fillStyle = '#444444';
-          ctx.fillText(overlay.subline.substring(0, 55), textStartX, y + sFont, textMaxW);
-          y += sFont * 1.6;
+          ctx.fillText(overlay.subline.substring(0, 60), tx, ty + sFont, tmW);
+          ty += sFont * 1.7;
         }
 
-        // ── Feature bullets with red circle icons ───────────────────────────────
+        // ── Feature bullets with red circle icons ─────────────────────────────────
         if (overlay.bullets && overlay.bullets.length > 0) {
-          const bFont    = Math.round(22 * sc);
-          const iconR    = Math.round(22 * sc);
-          const iconGap  = Math.round(14 * sc);
-          const rowGap   = Math.round(18 * sc);
-          y += Math.round(8 * sc);
+          const bFont  = Math.round(20 * sc);
+          const iconR  = Math.round(20 * sc);
+          const iconGap= Math.round(12 * sc);
+          ty += Math.round(10 * sc);
 
           for (const bullet of overlay.bullets.slice(0, 3)) {
-            const parts = bullet.split(':');
-            const boldPart = parts[0].trim();
-            const descPart = parts.length > 1 ? parts[1].trim() : '';
+            if (ty + iconR * 2 > maxY) break;
+            const parts    = bullet.split(':');
+            const boldPart = parts[0].trim().substring(0, 28);
+            const descPart = (parts[1] || '').trim().substring(0, 38);
 
-            // Red circle
-            ctx.fillStyle = 'transparent';
+            // Red circle outline
             ctx.strokeStyle = '#e02020';
-            ctx.lineWidth   = Math.round(2.5 * sc);
+            ctx.lineWidth   = Math.round(2 * sc);
             ctx.beginPath();
-            ctx.arc(textStartX + iconR, y + iconR, iconR, 0, Math.PI * 2);
+            ctx.arc(tx + iconR, ty + iconR, iconR, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Check inside circle
-            ctx.font      = `700 ${Math.round(18 * sc)}px Arial, sans-serif`;
+            // Checkmark
+            ctx.font      = `700 ${Math.round(16 * sc)}px Arial, sans-serif`;
             ctx.fillStyle = '#e02020';
             ctx.textAlign = 'center';
-            ctx.fillText('✓', textStartX + iconR, y + iconR + Math.round(7 * sc));
+            ctx.fillText('✓', tx + iconR, ty + iconR + Math.round(6 * sc));
             ctx.textAlign = 'left';
 
-            // Bold label
+            // Bold feature label
             ctx.font      = `800 ${bFont}px Arial, sans-serif`;
             ctx.fillStyle = '#111111';
-            ctx.fillText(boldPart.substring(0, 30), textStartX + iconR * 2 + iconGap, y + bFont * 0.9);
+            ctx.fillText(boldPart, tx + iconR * 2 + iconGap, ty + bFont * 0.92);
 
             // Description
             if (descPart) {
-              ctx.font      = `400 ${Math.round(17 * sc)}px Arial, sans-serif`;
+              ctx.font      = `400 ${Math.round(15 * sc)}px Arial, sans-serif`;
               ctx.fillStyle = '#555555';
-              ctx.fillText(descPart.substring(0, 40), textStartX + iconR * 2 + iconGap, y + bFont * 0.9 + Math.round(22 * sc));
+              ctx.fillText(descPart, tx + iconR * 2 + iconGap, ty + bFont * 0.92 + Math.round(20 * sc));
             }
 
-            y += iconR * 2 + rowGap + (descPart ? Math.round(16 * sc) : 0);
+            ty += iconR * 2 + Math.round(14 * sc) + (descPart ? Math.round(12 * sc) : 0);
           }
         }
 
@@ -214,17 +271,41 @@ export default function RightPanel() {
     });
   }, []);
 
-  // Helper: draw product image centered/fitted in a box
+
+  // Helper: draw product image centered/fitted in a box (legacy)
   function drawProductImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
-    const iw = img.naturalWidth;
-    const ih = img.naturalHeight;
-    const scale = Math.min(w / iw, h / ih);
-    const dw = iw * scale;
-    const dh = ih * scale;
-    const dx = x + (w - dw) / 2;
-    const dy = y + (h - dh) / 2;
-    ctx.drawImage(img, dx, dy, dw, dh);
+    const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+    const dw = img.naturalWidth * scale;
+    const dh = img.naturalHeight * scale;
+    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
   }
+
+  // Helper: draw product fitted (used with multiply blend for bg removal)
+  function drawProductFitted(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+    const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+    const dw = img.naturalWidth * scale;
+    const dh = img.naturalHeight * scale;
+    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  }
+
+  // Helper: word-wrap text to fit maxWidth, returns array of lines
+  function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let line = '';
+    for (const word of words) {
+      const test = line ? line + ' ' + word : word;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
 
   const handleDownloadWithOverlay = async () => {
     if (!selectedSlot?.imageUrl) return;
