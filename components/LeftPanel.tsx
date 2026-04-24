@@ -76,8 +76,9 @@ export default function LeftPanel() {
 
   const handleGenerate = async () => {
     try {
-      if (!inputs.productName.trim()) {
-        alert('Please enter your product name.');
+      // Allow generation if either productName OR a product link is provided
+      if (!inputs.productName.trim() && !inputs.ownProductLink.trim()) {
+        alert('Please enter your product name or paste a product link.');
         return;
       }
       setError(undefined);
@@ -89,7 +90,14 @@ export default function LeftPanel() {
 
       if (inputs.ownProductLink) {
         const res = await axios.post('/api/scrape', { url: inputs.ownProductLink, type: 'own' });
-        if (res.data.success) { productData = res.data.data; setProductData(res.data.data); }
+        if (res.data.success) {
+          productData = res.data.data;
+          setProductData(res.data.data);
+          // Auto-fill product name from scraped title if not already set
+          if (!inputs.productName.trim() && res.data.data?.title) {
+            setProductName(res.data.data.title.substring(0, 60));
+          }
+        }
       }
 
       if (inputs.mode === 'reference' && inputs.referenceLink) {
@@ -99,12 +107,13 @@ export default function LeftPanel() {
 
       if (!productData) {
         productData = {
-          title: inputs.productName,
+          title: inputs.productName || 'My Product',
           bullets: inputs.manualContent ? inputs.manualContent.split('\n').filter(Boolean) : [],
           features: [], specs: {}, benefits: [], usageInstructions: [], imageUrls: [],
         };
         setProductData(productData);
       }
+
 
       setCurrentStep('analyzing');
       let designSystem = session.designSystem;

@@ -5,9 +5,24 @@ import type { ProductData, DesignSystem } from '@/lib/types';
 export async function POST(req: NextRequest) {
   try {
     const { referenceProductData, imageUrls } = await req.json() as {
-      referenceProductData: ProductData;
+      referenceProductData: ProductData | null | undefined;
       imageUrls: string[];
     };
+
+    // Guard: if no reference data, return sensible defaults immediately
+    if (!referenceProductData) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          imageCount: 7,
+          imageOrder: ['hero', 'feature_highlight', 'before_after', 'how_to_use', 'use_cases', 'creative_1', 'creative_2'],
+          layoutStyle: 'centered', productPlacement: 'center', textPlacement: 'bottom',
+          backgroundType: 'pure-white', lightingStyle: 'studio', typographyFeel: 'bold',
+          iconUsage: true, spacing: 'balanced', compositionBalance: 'symmetric',
+          colorMood: 'neutral', overallTone: 'premium',
+        },
+      });
+    }
 
     const prompt = `You are an expert ecommerce creative director and design analyst.
 
