@@ -5,10 +5,12 @@
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-// ─── Chat / LLM via Gemini 2.5 Flash ────────────────────────
+// ─── Chat / LLM via Gemini ───────────────────────────────────
+// Primary: gemini-2.0-flash (stable, fast, free)
+// Fallback: gemini-1.5-flash (most reliable)
 export async function kieChat(
   messages: { role: string; content: string | any[] }[],
-  model = 'gemini-2.5-flash'
+  model = 'gemini-2.0-flash'
 ): Promise<string> {
   if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY not configured');
 
@@ -18,22 +20,35 @@ export async function kieChat(
     parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
   }));
 
-  const res = await fetch(
-    `${GEMINI_BASE}/models/${model}:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents }),
+  const tryModel = async (modelName: string): Promise<string> => {
+    const res = await fetch(
+      `${GEMINI_BASE}/models/${modelName}:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents }),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Gemini chat error ${res.status} (${modelName}): ${err}`);
     }
-  );
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini chat error ${res.status}: ${err}`);
+    const data = await res.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  };
+
+  // Try primary model, fall back to 1.5-flash if overloaded (503)
+  try {
+    return await tryModel(model);
+  } catch (e: any) {
+    if (e.message?.includes('503') || e.message?.includes('UNAVAILABLE') || e.message?.includes('overloaded')) {
+      console.warn(`[kieChat] ${model} overloaded, falling back to gemini-1.5-flash`);
+      return await tryModel('gemini-1.5-flash');
+    }
+    throw e;
   }
-
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
 // ─── Image Generation via Gemini 2.5 Flash Image ────────────
