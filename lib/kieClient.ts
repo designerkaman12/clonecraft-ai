@@ -1,196 +1,106 @@
-// kie.ai unified API client — using documented endpoints
-// Generate: POST /api/v1/gpt4o-image/generate  → returns { data: { taskId } }
-// Poll:     GET  /api/v1/gpt4o-image/record-info?taskId=  → data.response.resultUrls[]
-// Chat:     POST /v1/chat/completions (OpenAI-compatible)
-// Market:   POST /api/v1/market/task  → for recraft, topaz, etc.
+// Gemini AI unified client — replaces kie.ai and OpenAI
+// Chat:    POST /v1beta/models/gemini-2.5-flash:generateContent
+// Images:  POST /v1beta/models/gemini-2.5-flash-image:generateContent (returns base64)
 
-const KIE_BASE = (process.env.KIE_API_BASE_URL || 'https://api.kie.ai').replace(/\/$/, '');
-const KIE_KEY  = process.env.KIE_API_KEY || '';
+const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-export const kieHeaders = () => ({
-  Authorization: `Bearer ${KIE_KEY}`,
-  'Content-Type': 'application/json',
-});
-
-// Model slug map: model → path prefix on api.kie.ai
-// Format: https://api.kie.ai/{slug}/v1/chat/completions
-const MODEL_SLUGS: Record<string, string> = {
-  'gpt-4o':    'gpt-5-2',
-  'gpt-4o-mini': 'gpt-5-2',
-  'gpt-5-2':   'gpt-5-2',
-  'gpt-5-4':   'gpt-5-4',
-  'gpt-4':     'gpt-5-2',
-};
-
-// ─── Chat / LLM ─────────────────────────────────────────────
-// Endpoint: POST https://api.kie.ai/{model-slug}/v1/chat/completions
+// ─── Chat / LLM via Gemini 2.5 Flash ────────────────────────
 export async function kieChat(
   messages: { role: string; content: string | any[] }[],
-  model = 'gpt-4o'
+  model = 'gemini-2.5-flash'
 ): Promise<string> {
-  const slug = MODEL_SLUGS[model] ?? 'gpt-5-2';
-  const url = `${KIE_BASE}/${slug}/v1/chat/completions`;
+  if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY not configured');
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: kieHeaders(),
-    body: JSON.stringify({ messages, temperature: 0.7 }),
-  });
+  // Convert OpenAI-style messages to Gemini format
+  const contents = messages.map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
+  }));
+
+  const res = await fetch(
+    `${GEMINI_BASE}/models/${model}:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents }),
+    }
+  );
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`kie chat error ${res.status}: ${err}`);
+    throw new Error(`Gemini chat error ${res.status}: ${err}`);
   }
+
   const data = await res.json();
-  return (data.choices?.[0]?.message?.content as string) ?? '';
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
-// ─── 4o Image Generation ────────────────────────────────────
-// POST /api/v1/gpt4o-image/generate
-// Body: { prompt, size (ratio like "1:1"), filesUrl?, isEnhance? }
+// ─── Image Generation via Gemini 2.5 Flash Image ────────────
+// Returns a data URL: "data:image/png;base64,..."
 export async function kieGenerateImage(
   prompt: string,
   aspectRatio = '1:1'
 ): Promise<string> {
-  const body = {
-    prompt,
-    size: aspectRatio, // API accepts "1:1", "4:5", "16:9", "9:16", "3:4"
-    isEnhance: false,
-    uploadCn: false,
-    enableFallback: false,
-  };
+  if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY not configured');
 
-  const res = await fetch(`${KIE_BASE}/api/v1/gpt4o-image/generate`, {
-    method: 'POST',
-    headers: kieHeaders(),
-    body: JSON.stringify(body),
-  });
+  const trimmedPrompt = prompt.trim().substring(0, 2000);
+
+  const res = await fetch(
+    `${GEMINI_BASE}/models/gemini-2.5-flash-image:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: trimmedPrompt }] }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    }
+  );
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`kie image generate error ${res.status}: ${err}`);
+    throw new Error(`Gemini image error ${res.status}: ${err}`);
   }
 
   const data = await res.json();
-  if (data.code !== 200 && data.code !== 0) {
-    throw new Error(`kie API error: ${data.msg || JSON.stringify(data)}`);
-  }
+  const parts = data?.candidates?.[0]?.content?.parts ?? [];
+  const imgPart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
 
-  const taskId = data.data?.taskId;
-  if (!taskId) throw new Error('No taskId returned from generate endpoint');
+  if (!imgPart) throw new Error('No image returned from Gemini');
 
-  return await poll4oTask(taskId);
+  const { mimeType, data: b64 } = imgPart.inlineData;
+  return `data:${mimeType};base64,${b64}`;
 }
 
-// ─── Poll 4o task until SUCCESS ───────────────────────────
-// GET /api/v1/gpt4o-image/record-info?taskId=...
-// Response: data.status = "SUCCESS" | "FAILED" | "IN_QUEUE" | "IN_PROGRESS"
-// Image URL: data.response.resultUrls[0]
-export async function poll4oTask(
-  taskId: string,
-  maxAttempts = 40,
-  intervalMs = 4000
-): Promise<string> {
-  for (let i = 0; i < maxAttempts; i++) {
-    await delay(intervalMs);
+// ─── Stubs for legacy kie.ai functions (kept for compatibility) ─
 
-    const res = await fetch(
-      `${KIE_BASE}/api/v1/gpt4o-image/record-info?taskId=${taskId}`,
-      { headers: kieHeaders() }
-    );
-
-    if (!res.ok) {
-      console.warn(`Poll attempt ${i + 1} returned ${res.status}, retrying...`);
-      continue;
-    }
-
-    const data = await res.json();
-    const record = data.data;
-    const status: string = record?.status ?? '';
-
-    if (status === 'SUCCESS' || record?.successFlag === 1) {
-      const urls: string[] = record?.response?.resultUrls ?? [];
-      if (urls.length > 0) return urls[0];
-      throw new Error('Task succeeded but no result URLs returned');
-    }
-
-    if (status === 'FAILED' || status === 'ERROR') {
-      throw new Error(`kie task ${taskId} failed: ${record?.errorMessage || status}`);
-    }
-
-    console.log(`Task ${taskId}: ${status} (attempt ${i + 1}/${maxAttempts})`);
-  }
-
-  throw new Error(`kie task ${taskId} timed out after ${maxAttempts} attempts`);
+export async function poll4oTask(): Promise<string> {
+  throw new Error('poll4oTask not used with Gemini backend.');
 }
 
-// ─── Market API tasks (recraft, topaz, etc.) ─────────────────
-// POST /api/v1/market/task → returns { data: { taskId } }
-// GET  /market/common/get-task-detail?taskId=  → polls result
-export async function kieMarketTask(
-  model: string,
-  input: Record<string, unknown>
-): Promise<string> {
-  const body = { model, input };
-
-  const res = await fetch(`${KIE_BASE}/api/v1/market/task`, {
-    method: 'POST',
-    headers: kieHeaders(),
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`kie market task error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  const taskId = data?.data?.task_id ?? data?.data?.taskId ?? data?.task_id;
-  if (!taskId) throw new Error(`No taskId from market task: ${JSON.stringify(data)}`);
-
-  return await pollMarketTask(taskId);
-}
-
-// Poll market task
-export async function pollMarketTask(
-  taskId: string,
-  maxAttempts = 30,
-  intervalMs = 3000
-): Promise<string> {
-  for (let i = 0; i < maxAttempts; i++) {
-    await delay(intervalMs);
-
-    const res = await fetch(
-      `${KIE_BASE}/api/v1/market/task/${taskId}`,
-      { headers: kieHeaders() }
-    );
-
-    if (!res.ok) continue;
-    const data = await res.json();
-    const output = data?.data?.output ?? data?.output ?? {};
-    const status: string = data?.data?.status ?? data?.status ?? '';
-
-    if (status === 'succeeded' || status === 'completed' || status === 'success') {
-      return output?.imageUrl ?? output?.url ?? output?.image_url ?? '';
-    }
-    if (status === 'failed' || status === 'error') {
-      throw new Error(`Market task ${taskId} failed`);
-    }
-  }
-  throw new Error(`Market task ${taskId} timed out`);
-}
-
-// ─── Background Removal via recraft ─────────────────────────
 export async function kieRemoveBackground(imageUrl: string): Promise<string> {
-  return kieMarketTask('recraft/remove-background', { image_url: imageUrl });
+  console.warn('[kieRemoveBackground] Not available with Gemini. Returning original.');
+  return imageUrl;
 }
 
-// ─── Image Upscale via Topaz ─────────────────────────────────
 export async function kieUpscaleImage(imageUrl: string): Promise<string> {
-  return kieMarketTask('topaz/image-upscale', { image_url: imageUrl, scale: 4 });
+  console.warn('[kieUpscaleImage] Not available with Gemini. Returning original.');
+  return imageUrl;
 }
 
-// ─── Utility ─────────────────────────────────────────────────
+export async function kieMarketTask(model: string): Promise<string> {
+  throw new Error(`kieMarketTask (${model}) not supported with Gemini backend.`);
+}
+
+export async function pollMarketTask(): Promise<string> {
+  throw new Error('pollMarketTask not supported with Gemini backend.');
+}
+
+export const kieHeaders = () => ({
+  'Content-Type': 'application/json',
+});
+
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }

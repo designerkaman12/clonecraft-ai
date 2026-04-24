@@ -38,34 +38,30 @@ export default function CenterPanel() {
       </div>
 
       <div className="panel-body">
-        {/* Idle State */}
+        {/* Idle State — Hero */}
         {currentStep === 'idle' && (
-          <div style={{ textAlign: 'center', paddingTop: 60 }}>
-            <div style={{ margin: '0 auto 16px', width: 56, height: 56, borderRadius: 16, background: 'rgba(99,102,241,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid rgba(99,102,241,0.12)' }}>
-              <Sparkles size={24} style={{ color: 'var(--indigo)' }} />
+          <div className="idle-hero animate-fade-up">
+            <div className="idle-hero-badge">
+              <Sparkles size={12} />
+              AI-Powered Creative Engine
             </div>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
-              Configure & Generate
-            </h3>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 280, margin: '0 auto', lineHeight: 1.7 }}>
-              Fill in your product details on the left and click{' '}
-              <strong style={{ color: 'var(--indigo)' }}>Generate Creatives</strong> to begin.
+            <h1>
+              Generate <span>Amazon-Ready</span><br />Product Images
+            </h1>
+            <p>
+              Enter your product details, upload a reference image, and let AI craft 7 professional listing creatives — ready to upload in minutes.
             </p>
-            {/* Quick step guide */}
-            <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 32, flexWrap: 'wrap' }}>
+            <div className="idle-steps">
               {[
-                ['1', 'Enter Product', 'Name + links'],
+                ['1', 'Enter Product', 'Name + content'],
                 ['2', 'Configure', 'Style & platform'],
-                ['3', 'Generate', 'AI creates 7 images'],
-                ['4', 'Export', 'Download ZIP'],
+                ['3', 'Generate', 'AI creates images'],
+                ['4', 'Export', 'Download as ZIP'],
               ].map(([num, title, desc]) => (
-                <div key={num} style={{
-                  background: 'var(--bg-surface)', border: '1.5px solid var(--border)',
-                  borderRadius: 12, padding: '12px 14px', flex: '1 1 90px', minWidth: 90,
-                }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, background: 'var(--grad-primary)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>{num}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>{title}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{desc}</div>
+                <div key={num} className="idle-step">
+                  <div className="idle-step-num">{num}</div>
+                  <div className="idle-step-title">{title}</div>
+                  <div className="idle-step-desc">{desc}</div>
                 </div>
               ))}
             </div>
