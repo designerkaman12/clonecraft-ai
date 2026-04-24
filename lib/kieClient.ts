@@ -6,11 +6,11 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 // ─── Chat / LLM via Gemini ───────────────────────────────────
-// Primary: gemini-2.0-flash-001 (stable, fast, free)
-// Fallback: gemini-2.5-flash (latest)
+// Primary: gemini-2.5-flash (stable, fast, free)
+// Fallback: gemini-2.5-flash-lite (lightweight)
 export async function kieChat(
   messages: { role: string; content: string | any[] }[],
-  model = 'gemini-2.0-flash-001'
+  model = 'gemini-2.5-flash'
 ): Promise<string> {
   if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY not configured');
 
@@ -39,13 +39,13 @@ export async function kieChat(
     return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   };
 
-  // Try primary model, fall back to 2.5-flash if overloaded (503)
+  // Try primary model, fall back to lite if overloaded (503)
   try {
     return await tryModel(model);
   } catch (e: any) {
     if (e.message?.includes('503') || e.message?.includes('UNAVAILABLE') || e.message?.includes('overloaded')) {
-      console.warn(`[kieChat] ${model} overloaded, falling back to gemini-2.5-flash`);
-      return await tryModel('gemini-2.5-flash');
+      console.warn(`[kieChat] ${model} overloaded, falling back to gemini-2.5-flash-lite`);
+      return await tryModel('gemini-2.5-flash-lite');
     }
     throw e;
   }
