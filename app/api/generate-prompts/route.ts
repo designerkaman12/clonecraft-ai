@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     const promptsResult = await kieChat([
       {
         role: 'user',
-        content: `You are an AI image prompt engineer for ecommerce product photography (like Amazon listings).
+        content: `You are an Amazon product listing creative director. Generate image prompts and text for ${slotCount} product creatives.
 
 PRODUCT: ${productTitle}
 CATEGORY: ${category}
@@ -58,76 +58,77 @@ KEY FEATURES: ${bullets.join(' | ') || 'high quality product'}
 BACKGROUND: ${bg}
 TONE: ${tone || 'premium'}
 
-For each image type below, provide:
-1. A SHORT visual prompt (max 200 chars) - ONLY describe scene, lighting, composition. NO brand names.
-2. Overlay text config for Amazon-style text on the image
+CRITICAL RULES:
+- Bullets MUST be in format "FEATURE NAME: short description" (e.g. "SECURE FIT: Keeps tool in place")
+- Headline: bold, punchy, 3-5 words, ALL CAPS style
+- Subline: descriptive sentence, 5-8 words
+- Use ONLY features relevant to THIS product
+- overlayPosition must be "top" for all slots
 
-Image types: ${selectedTypes.join(', ')}
-
-Return ONLY this JSON (no markdown fences):
+Return ONLY valid JSON (no markdown):
 {
   "slots": {
     "hero": {
-      "prompt": "product centered on pure white background, dramatic studio lighting, soft shadows",
+      "prompt": "product on pure white background, centered, dramatic studio lighting, soft shadow",
       "overlay": {
-        "headline": "Professional Grade Performance",
-        "subline": "Engineered for Excellence",
-        "bullets": ["Premium Quality", "Easy to Use", "Long Lasting"],
+        "headline": "Save Space Stay Organized",
+        "subline": "Perfect for Detailing Studios and Garages",
+        "bullets": ["SECURE STORAGE: Wall-mounted holder keeps tools safe", "EASY ACCESS: Grab and go in seconds", "SPACE SAVING: Frees up valuable workspace"],
         "badge": "BEST SELLER",
-        "overlayPosition": "bottom"
+        "overlayPosition": "top"
       }
     },
     "feature": {
-      "prompt": "close-up macro detail shot, white background, key component highlighted",
+      "prompt": "product detail shot highlighting key component, white background, macro focus",
       "overlay": {
-        "headline": "Advanced Technology Inside",
-        "subline": "3 Speed Settings",
-        "bullets": ["Variable Speed Control", "Ergonomic Design", "Low Vibration"],
-        "overlayPosition": "right"
+        "headline": "Scratch Free Design",
+        "subline": "Soft Edge Protection for Your Tools",
+        "bullets": ["SOFT LINING: Prevents scratches and scuffs", "DURABLE METAL: Built strong to last", "SECURE GRIP: Non-slip inner material"],
+        "overlayPosition": "top"
       }
     },
     "before_after": {
-      "prompt": "split composition showing contrast before and after, dramatic difference",
+      "prompt": "split scene showing cluttered vs organized workspace, dramatic contrast",
       "overlay": {
-        "headline": "Remarkable Results",
-        "subline": "See The Difference",
+        "headline": "Before After Transformation",
+        "subline": "From Cluttered Mess to Perfect Order",
         "bullets": [],
         "badge": "BEFORE / AFTER",
         "overlayPosition": "top"
       }
     },
     "how_to_use": {
-      "prompt": "hands holding product, demonstration shot, lifestyle white background",
+      "prompt": "hands installing product on wall, step by step demo, clean background",
       "overlay": {
-        "headline": "Simple 3-Step Process",
-        "subline": "Easy for Everyone",
-        "bullets": ["Step 1: Prepare", "Step 2: Apply", "Step 3: Done"],
-        "overlayPosition": "bottom"
+        "headline": "Secure Wall Storage",
+        "subline": "Keep Your Tools Organized and Protected",
+        "bullets": ["EASY INSTALL: Mounts in minutes with included hardware", "WALL MOUNTED: Saves floor and shelf space", "UNIVERSAL FIT: Works with most polisher models"],
+        "overlayPosition": "top"
       }
     },
     "uses": {
-      "prompt": "product in real environment, lifestyle shot, natural lighting",
+      "prompt": "product in real garage or studio environment, lifestyle shot, natural warm light",
       "overlay": {
-        "headline": "Versatile Applications",
-        "subline": "Use It Anywhere",
-        "bullets": ["Home Use", "Professional Use", "Daily Routine"],
-        "overlayPosition": "left"
+        "headline": "Heavy Duty Metal Build",
+        "subline": "Strong and Durable Construction",
+        "bullets": ["RUST RESISTANT: Built for long-term use", "LONG LASTING: Reliable strength that lasts", "PRO GRADE: Trusted by detailing professionals"],
+        "overlayPosition": "top"
       }
     },
     "creative_1": {
-      "prompt": "artistic product composition, dramatic lighting, dark or gradient background",
+      "prompt": "product artistically lit against dark dramatic background, premium feel",
       "overlay": {
         "headline": "Premium Quality",
         "subline": "Crafted to Perfection",
         "bullets": [],
-        "overlayPosition": "bottom"
+        "overlayPosition": "top"
       }
     },
     "creative_2": {
-      "prompt": "lifestyle hero shot, product with accessories, aspirational scene",
+      "prompt": "product with accessories in aspirational garage setup, lifestyle hero shot",
       "overlay": {
         "headline": "Complete Solution",
-        "subline": "Everything You Need",
+        "subline": "Everything You Need for a Tidy Workspace",
         "bullets": [],
         "badge": "NEW",
         "overlayPosition": "top"
@@ -136,7 +137,7 @@ Return ONLY this JSON (no markdown fences):
   }
 }
 
-IMPORTANT: Customize the overlay text for THIS specific product (${productTitle}). Make it compelling and relevant.`,
+IMPORTANT: Customize ALL text for THIS specific product (${productTitle}). Make headlines punchy. Bullets MUST use "LABEL: description" format.`,
       },
     ]);
 

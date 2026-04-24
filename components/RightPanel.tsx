@@ -22,144 +22,230 @@ export default function RightPanel() {
   const [showOverlay, setShowOverlay]                 = useState(true);
   const [overlayRendering, setOverlayRendering]       = useState(false);
 
-  // ── Canvas overlay compositor ────────────────────────────────────────────────
+  // ── Amazon-style Canvas Compositor ──────────────────────────────────────────
+  // Matches the professional layout from sample images:
+  // Bold BLACK headline + RED accent word, red underline, feature icons, product right
   const compositeImageWithOverlay = useCallback(async (
     imageUrl: string,
-    overlay: OverlayConfig
+    overlay: OverlayConfig,
+    slotType?: string
   ): Promise<string> => {
     return new Promise((resolve, reject) => {
-      const canvas  = document.createElement('canvas');
-      const ctx     = canvas.getContext('2d')!;
-      const img     = new Image();
+      const SIZE = 1024;
+      const canvas = document.createElement('canvas');
+      canvas.width  = SIZE;
+      canvas.height = SIZE;
+      const ctx = canvas.getContext('2d')!;
+      const img = new Image();
       img.crossOrigin = 'anonymous';
+
       img.onload = () => {
-        canvas.width  = img.naturalWidth  || 1024;
-        canvas.height = img.naturalHeight || 1024;
-        ctx.drawImage(img, 0, 0);
+        // ── Background ──────────────────────────────────────────────────────────
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, SIZE, SIZE);
 
-        const W = canvas.width;
-        const H = canvas.height;
-        const pos = overlay.overlayPosition || 'bottom';
-        const isTop = pos === 'top';
-        const isLeft = pos === 'left';
-        const isRight = pos === 'right';
-        const panelH = Math.round(H * 0.30);
+        const pos  = overlay.overlayPosition || 'top';
+        const isHero     = slotType === 'hero';
+        const isFeature  = slotType === 'feature' || slotType === 'how_to_use' || slotType === 'uses';
+        const isCreative = slotType === 'creative_1' || slotType === 'creative_2';
 
-        // Gradient overlay bar
-        let grd: CanvasGradient;
-        if (isTop) {
-          grd = ctx.createLinearGradient(0, 0, 0, panelH);
-          grd.addColorStop(0, 'rgba(0,0,0,0.75)');
-          grd.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = grd;
-          ctx.fillRect(0, 0, W, panelH);
-        } else if (isLeft) {
-          grd = ctx.createLinearGradient(0, 0, W * 0.45, 0);
-          grd.addColorStop(0, 'rgba(0,0,0,0.78)');
-          grd.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = grd;
-          ctx.fillRect(0, 0, W * 0.45, H);
-        } else if (isRight) {
-          grd = ctx.createLinearGradient(W, 0, W * 0.55, 0);
-          grd.addColorStop(0, 'rgba(0,0,0,0.78)');
-          grd.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = grd;
-          ctx.fillRect(W * 0.55, 0, W, H);
-        } else {
-          // bottom (default)
-          grd = ctx.createLinearGradient(0, H - panelH, 0, H);
-          grd.addColorStop(0, 'rgba(0,0,0,0)');
-          grd.addColorStop(1, 'rgba(0,0,0,0.82)');
-          ctx.fillStyle = grd;
-          ctx.fillRect(0, H - panelH, W, panelH);
-        }
-
-        // Text positioning
-        const textX = isRight ? W * 0.58 : isLeft ? W * 0.04 : W * 0.05;
-        let textY   = isTop ? H * 0.06 : isLeft || isRight ? H * 0.30 : H - panelH + H * 0.04;
-        const maxTW = isLeft || isRight ? W * 0.38 : W * 0.88;
-        const scale = W / 1024;
-
-        // Badge
-        if (overlay.badge) {
-          const bFontSize = Math.round(18 * scale);
-          ctx.font        = `700 ${bFontSize}px 'Arial', sans-serif`;
-          const bPad      = Math.round(8 * scale);
-          const bW        = ctx.measureText(overlay.badge).width + bPad * 2.5;
-          const bH        = bFontSize + bPad * 1.4;
-          const bX        = isRight ? W - bW - Math.round(16 * scale) : Math.round(16 * scale);
-          const bY        = isTop ? Math.round(16 * scale) : H - bH - Math.round(16 * scale);
-          ctx.fillStyle   = '#f59e0b';
+        // ── Product image placement ──────────────────────────────────────────────
+        if (isHero) {
+          // Hero: product centered, slightly right, large
+          const pSize = SIZE * 0.72;
+          const pX    = SIZE * 0.28;
+          const pY    = SIZE * 0.14;
+          drawProductImage(ctx, img, pX, pY, pSize, pSize);
+        } else if (isFeature || slotType === 'before_after') {
+          // Feature: product on right half
+          const pSize = SIZE * 0.54;
+          const pX    = SIZE * 0.44;
+          const pY    = SIZE * 0.20;
+          drawProductImage(ctx, img, pX, pY, pSize, pSize);
+        } else if (isCreative) {
+          // Creative: full bleed with diagonal bottom stripe
+          const pSize = SIZE * 0.65;
+          const pX    = SIZE * 0.32;
+          const pY    = SIZE * 0.08;
+          drawProductImage(ctx, img, pX, pY, pSize, pSize);
+          // Diagonal red-black stripe bottom
+          ctx.save();
+          ctx.fillStyle = '#111111';
           ctx.beginPath();
-          ctx.roundRect(bX, bY, bW, bH, Math.round(6 * scale));
+          ctx.moveTo(0, SIZE * 0.82);
+          ctx.lineTo(SIZE * 0.55, SIZE * 0.74);
+          ctx.lineTo(SIZE, SIZE * 0.74);
+          ctx.lineTo(SIZE, SIZE);
+          ctx.lineTo(0, SIZE);
+          ctx.closePath();
           ctx.fill();
-          ctx.fillStyle = '#000';
-          ctx.fillText(overlay.badge, bX + bPad, bY + bH - bPad * 0.9);
+          ctx.fillStyle = '#e02020';
+          ctx.beginPath();
+          ctx.moveTo(0, SIZE * 0.80);
+          ctx.lineTo(SIZE * 0.55, SIZE * 0.72);
+          ctx.lineTo(SIZE * 0.55, SIZE * 0.74);
+          ctx.lineTo(0, SIZE * 0.82);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        } else {
+          // Default: product right
+          const pSize = SIZE * 0.56;
+          const pX    = SIZE * 0.42;
+          const pY    = SIZE * 0.18;
+          drawProductImage(ctx, img, pX, pY, pSize, pSize);
         }
 
-        // Headline
-        const hFontSize = Math.round(44 * scale);
-        ctx.font        = `800 ${hFontSize}px 'Arial Black', 'Arial', sans-serif`;
-        ctx.fillStyle   = overlay.textColor || '#ffffff';
-        ctx.shadowColor = 'rgba(0,0,0,0.6)';
-        ctx.shadowBlur  = Math.round(8 * scale);
-        const headline  = overlay.headline || '';
-        // Wrap long headline
-        const hWords    = headline.split(' ');
-        let hLine       = '';
-        for (const w of hWords) {
-          const test = hLine ? hLine + ' ' + w : w;
-          if (ctx.measureText(test).width > maxTW && hLine) {
-            ctx.fillText(hLine, textX, textY + hFontSize);
-            textY += hFontSize * 1.15;
-            hLine = w;
-          } else { hLine = test; }
-        }
-        ctx.fillText(hLine, textX, textY + hFontSize);
-        textY += hFontSize * 1.3;
+        // ── Text area (left side for most layouts, top for hero) ────────────────
+        const textStartX = isHero ? SIZE * 0.04 : SIZE * 0.04;
+        const textStartY = isHero ? SIZE * 0.06 : SIZE * 0.08;
+        const textMaxW   = isHero ? SIZE * 0.56 : SIZE * 0.44;
+        let y = textStartY;
+        const sc = SIZE / 1024;
 
-        // Subline
+        // ── Badge (if any) ───────────────────────────────────────────────────────
+        if (overlay.badge) {
+          const bFont = Math.round(16 * sc);
+          ctx.font    = `800 ${bFont}px Arial, sans-serif`;
+          const bPad  = Math.round(7 * sc);
+          const bW    = ctx.measureText(overlay.badge).width + bPad * 3;
+          const bH    = bFont + bPad * 1.6;
+          ctx.fillStyle = '#e02020';
+          ctx.beginPath();
+          ctx.roundRect(textStartX, y, bW, bH, 4);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.fillText(overlay.badge, textStartX + bPad, y + bH - bPad * 0.7);
+          y += bH + Math.round(12 * sc);
+        }
+
+        // ── Headline: split into BLACK + RED (second line/word accent) ──────────
+        const headline = (overlay.headline || '').toUpperCase();
+        const words    = headline.split(' ');
+        // First ~half = black, second ~half = red (matches sample: SAVE SPACE & / STAY ORGANIZED)
+        const splitIdx   = Math.ceil(words.length / 2);
+        const line1Words = words.slice(0, splitIdx);
+        const line2Words = words.slice(splitIdx);
+        const hFont      = Math.round(72 * sc);
+        ctx.font         = `900 ${hFont}px Arial Black, Arial, sans-serif`;
+        ctx.shadowColor  = 'rgba(0,0,0,0.08)';
+        ctx.shadowBlur   = 4;
+
+        // Line 1: Black
+        ctx.fillStyle = '#111111';
+        const line1 = line1Words.join(' ');
+        ctx.fillText(line1, textStartX, y + hFont, textMaxW);
+        y += hFont * 1.05;
+
+        // Line 2: Red (accent)
+        if (line2Words.length > 0) {
+          ctx.fillStyle = '#e02020';
+          const line2 = line2Words.join(' ');
+          ctx.fillText(line2, textStartX, y + hFont, textMaxW);
+          y += hFont * 1.0;
+        }
+        ctx.shadowBlur = 0;
+
+        // ── Red underline separator ─────────────────────────────────────────────
+        const lineW = Math.min(ctx.measureText(line1).width, textMaxW * 0.7);
+        ctx.fillStyle = '#e02020';
+        ctx.fillRect(textStartX, y + Math.round(8 * sc), lineW, Math.round(4 * sc));
+        y += Math.round(28 * sc);
+
+        // ── Subline ─────────────────────────────────────────────────────────────
         if (overlay.subline) {
-          const sFontSize = Math.round(26 * scale);
-          ctx.font        = `400 ${sFontSize}px 'Arial', sans-serif`;
-          ctx.fillStyle   = 'rgba(255,255,255,0.82)';
-          ctx.shadowBlur  = Math.round(4 * scale);
-          ctx.fillText(overlay.subline.substring(0, 60), textX, textY + sFontSize);
-          textY += sFontSize * 1.5;
+          const sFont = Math.round(28 * sc);
+          ctx.font    = `400 ${sFont}px Arial, sans-serif`;
+          ctx.fillStyle = '#444444';
+          ctx.fillText(overlay.subline.substring(0, 55), textStartX, y + sFont, textMaxW);
+          y += sFont * 1.6;
         }
 
-        // Bullets (checkmarks)
+        // ── Feature bullets with red circle icons ───────────────────────────────
         if (overlay.bullets && overlay.bullets.length > 0) {
-          const bFontSize = Math.round(21 * scale);
-          ctx.font        = `600 ${bFontSize}px 'Arial', sans-serif`;
-          ctx.fillStyle   = '#ffffff';
-          ctx.shadowBlur  = Math.round(3 * scale);
+          const bFont    = Math.round(22 * sc);
+          const iconR    = Math.round(22 * sc);
+          const iconGap  = Math.round(14 * sc);
+          const rowGap   = Math.round(18 * sc);
+          y += Math.round(8 * sc);
+
           for (const bullet of overlay.bullets.slice(0, 3)) {
-            const line = `✓ ${bullet}`;
-            ctx.fillText(line.substring(0, 45), textX, textY + bFontSize);
-            textY += bFontSize * 1.45;
+            const parts = bullet.split(':');
+            const boldPart = parts[0].trim();
+            const descPart = parts.length > 1 ? parts[1].trim() : '';
+
+            // Red circle
+            ctx.fillStyle = 'transparent';
+            ctx.strokeStyle = '#e02020';
+            ctx.lineWidth   = Math.round(2.5 * sc);
+            ctx.beginPath();
+            ctx.arc(textStartX + iconR, y + iconR, iconR, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Check inside circle
+            ctx.font      = `700 ${Math.round(18 * sc)}px Arial, sans-serif`;
+            ctx.fillStyle = '#e02020';
+            ctx.textAlign = 'center';
+            ctx.fillText('✓', textStartX + iconR, y + iconR + Math.round(7 * sc));
+            ctx.textAlign = 'left';
+
+            // Bold label
+            ctx.font      = `800 ${bFont}px Arial, sans-serif`;
+            ctx.fillStyle = '#111111';
+            ctx.fillText(boldPart.substring(0, 30), textStartX + iconR * 2 + iconGap, y + bFont * 0.9);
+
+            // Description
+            if (descPart) {
+              ctx.font      = `400 ${Math.round(17 * sc)}px Arial, sans-serif`;
+              ctx.fillStyle = '#555555';
+              ctx.fillText(descPart.substring(0, 40), textStartX + iconR * 2 + iconGap, y + bFont * 0.9 + Math.round(22 * sc));
+            }
+
+            y += iconR * 2 + rowGap + (descPart ? Math.round(16 * sc) : 0);
           }
         }
 
-        ctx.shadowBlur = 0;
         resolve(canvas.toDataURL('image/png'));
       };
+
       img.onerror = () => reject(new Error('Image load failed'));
       img.src = imageUrl;
     });
   }, []);
+
+  // Helper: draw product image centered/fitted in a box
+  function drawProductImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const scale = Math.min(w / iw, h / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    const dx = x + (w - dw) / 2;
+    const dy = y + (h - dh) / 2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+  }
 
   const handleDownloadWithOverlay = async () => {
     if (!selectedSlot?.imageUrl) return;
     setOverlayRendering(true);
     try {
       let dataUrl: string;
-      if (showOverlay && selectedSlot.overlayConfig) {
-        dataUrl = await compositeImageWithOverlay(selectedSlot.imageUrl, selectedSlot.overlayConfig);
+      if (selectedSlot.overlayConfig) {
+        // Always bake text into the download — matches Amazon listing quality
+        dataUrl = await compositeImageWithOverlay(
+          selectedSlot.imageUrl,
+          selectedSlot.overlayConfig,
+          selectedSlot.type
+        );
       } else {
-        const res  = await fetch(selectedSlot.imageUrl);
-        const blob = await res.blob();
-        dataUrl    = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); });
+        // No overlay config — just download the raw image
+        dataUrl = selectedSlot.imageUrl.startsWith('data:')
+          ? selectedSlot.imageUrl
+          : await (async () => {
+              const res  = await fetch(selectedSlot.imageUrl!);
+              const blob = await res.blob();
+              return await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); });
+            })();
       }
       const a      = document.createElement('a');
       a.href       = dataUrl;
@@ -274,9 +360,9 @@ export default function RightPanel() {
           {selectedSlot?.status === 'generating' && (
             <div style={{ textAlign: 'center' }}>
               <Loader2 size={28} style={{ color: 'var(--indigo)', animation: 'spin 0.7s linear infinite', margin: '0 auto 12px', display: 'block' }} />
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Generating image…</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Creating creative…</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, maxWidth: 180, lineHeight: 1.6 }}>
-                kie.ai is rendering. Takes 30–90 seconds.
+                Compositing your product image with Amazon-style layout.
               </div>
             </div>
           )}
@@ -291,54 +377,55 @@ export default function RightPanel() {
                 style={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 280px)', objectFit: 'contain' }}
               />
 
-              {/* Text Overlay Preview — CSS-based live preview */}
+              {/* Amazon-style text overlay preview (CSS-based, matches Canvas output) */}
               {showOverlay && selectedSlot.overlayConfig && (() => {
-                const ov   = selectedSlot.overlayConfig!;
-                const pos  = ov.overlayPosition || 'bottom';
-                const isTop = pos === 'top';
-                const overlayStyle: React.CSSProperties = {
-                  position: 'absolute',
-                  left: pos === 'right' ? 'auto' : 0,
-                  right: pos === 'right' ? 0 : 'auto',
-                  top: isTop ? 0 : 'auto',
-                  bottom: isTop ? 'auto' : 0,
-                  width: pos === 'left' || pos === 'right' ? '45%' : '100%',
-                  height: isTop ? '35%' : pos === 'left' || pos === 'right' ? '100%' : '38%',
-                  background: pos === 'left'
-                    ? 'linear-gradient(to right, rgba(0,0,0,0.82), transparent)'
-                    : pos === 'right'
-                    ? 'linear-gradient(to left, rgba(0,0,0,0.82), transparent)'
-                    : isTop
-                    ? 'linear-gradient(to bottom, rgba(0,0,0,0.78), transparent)'
-                    : 'linear-gradient(to top, rgba(0,0,0,0.84), transparent)',
-                  padding: '16px 18px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: isTop ? 'flex-start' : 'flex-end',
-                  pointerEvents: 'none',
-                };
+                const ov = selectedSlot.overlayConfig!;
+                const words = (ov.headline || '').toUpperCase().split(' ');
+                const splitIdx = Math.ceil(words.length / 2);
+                const line1 = words.slice(0, splitIdx).join(' ');
+                const line2 = words.slice(splitIdx).join(' ');
                 return (
-                  <div style={overlayStyle}>
+                  <div style={{
+                    position: 'absolute', inset: 0, padding: '14px 16px',
+                    display: 'flex', flexDirection: 'column', justifyContent: 'flex-start',
+                    pointerEvents: 'none', background: 'transparent',
+                  }}>
                     {ov.badge && (
                       <span style={{
-                        alignSelf: 'flex-start', background: '#f59e0b', color: '#000',
-                        fontSize: 9, fontWeight: 800, padding: '2px 6px',
-                        borderRadius: 4, marginBottom: 5, letterSpacing: 0.5,
+                        alignSelf: 'flex-start', background: '#e02020', color: '#fff',
+                        fontSize: 8, fontWeight: 900, padding: '2px 7px',
+                        borderRadius: 3, marginBottom: 6, letterSpacing: 0.8,
                       }}>{ov.badge}</span>
                     )}
-                    <div style={{ fontSize: 13, fontWeight: 800, color: '#fff', lineHeight: 1.25, textShadow: '0 1px 4px rgba(0,0,0,0.7)', marginBottom: 3 }}>
-                      {ov.headline}
+                    {/* Headline: black + red */}
+                    <div style={{ lineHeight: 1.1, marginBottom: 4 }}>
+                      <div style={{ fontSize: 16, fontWeight: 900, color: '#111', textTransform: 'uppercase', letterSpacing: -0.3 }}>{line1}</div>
+                      {line2 && <div style={{ fontSize: 16, fontWeight: 900, color: '#e02020', textTransform: 'uppercase', letterSpacing: -0.3 }}>{line2}</div>}
                     </div>
+                    {/* Red underline */}
+                    <div style={{ width: 40, height: 2.5, background: '#e02020', marginBottom: 6 }} />
                     {ov.subline && (
-                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.82)', marginBottom: 4, textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>
-                        {ov.subline}
-                      </div>
+                      <div style={{ fontSize: 9, color: '#444', marginBottom: 8 }}>{ov.subline}</div>
                     )}
-                    {ov.bullets && ov.bullets.slice(0, 3).map((b, i) => (
-                      <div key={i} style={{ fontSize: 9.5, color: '#fff', fontWeight: 600, textShadow: '0 1px 2px rgba(0,0,0,0.7)', marginBottom: 2 }}>
-                        ✓ {b}
-                      </div>
-                    ))}
+                    {/* Feature bullets with red circle icons */}
+                    {ov.bullets && ov.bullets.slice(0, 3).map((b, i) => {
+                      const parts = b.split(':');
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 5, marginBottom: 5 }}>
+                          <div style={{
+                            width: 14, height: 14, borderRadius: '50%', border: '1.5px solid #e02020',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            flexShrink: 0, marginTop: 1,
+                          }}>
+                            <span style={{ fontSize: 7, color: '#e02020', fontWeight: 900 }}>✓</span>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 8.5, fontWeight: 800, color: '#111' }}>{parts[0]}</div>
+                            {parts[1] && <div style={{ fontSize: 7.5, color: '#555', marginTop: 1 }}>{parts[1].trim()}</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}

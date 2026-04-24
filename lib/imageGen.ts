@@ -1,11 +1,13 @@
 /**
- * imageGen.ts — Image generation via Gemini 2.5 Flash Image (through our Next.js API route)
+ * imageGen.ts — Image generation via Gemini (through /api/generate-image)
  *
- * Gemini image gen is synchronous — no polling needed.
- * Returns a base64 data URL: "data:image/png;base64,..."
+ * When productImageBase64 is provided:
+ *   → Gemini multimodal mode: uses the ACTUAL product photo as reference
+ *   → Ensures the generated creative shows the real product, not a random one
+ *
+ * When no product image:
+ *   → Standard text-to-image generation
  */
-
-const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 export async function generateImageWithPolling(
@@ -13,12 +15,12 @@ export async function generateImageWithPolling(
   aspectRatio = '1:1',
   slotId: string,
   onProgress?: (pct: number, status: string) => void,
-  productImageUrl?: string   // kept for API compat — not used by Gemini text-to-image
+  productImageBase64?: string   // ← base64 data URL of uploaded product image
 ): Promise<string> {
 
-  const finalPrompt = `${prompt.trim().substring(0, 1800)}. Professional product photography, sharp details, high quality, commercial grade.`;
+  const finalPrompt = prompt.trim().substring(0, 1800);
 
-  console.log(`[imageGen/gemini] slotId=${slotId} ratio=${aspectRatio} promptLen=${finalPrompt.length}`);
+  console.log(`[imageGen] slotId=${slotId} ratio=${aspectRatio} hasProductImage=${!!productImageBase64}`);
 
   onProgress?.(10, 'generating');
 
@@ -29,6 +31,7 @@ export async function generateImageWithPolling(
       prompt: finalPrompt,
       aspectRatio,
       slotId,
+      productImageBase64: productImageBase64 || null,  // pass to route for multimodal
     }),
   });
 
@@ -36,7 +39,7 @@ export async function generateImageWithPolling(
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Gemini image request failed (${res.status}): ${err.substring(0, 200)}`);
+    throw new Error(`Image generation failed (${res.status}): ${err.substring(0, 200)}`);
   }
 
   const data = await res.json();
@@ -45,11 +48,12 @@ export async function generateImageWithPolling(
     throw new Error(data.error || 'Image generation failed');
   }
 
-  const imageUrl = data.imageUrl;
-  if (!imageUrl) throw new Error('No image URL returned from Gemini');
+  if (!data.imageUrl) {
+    throw new Error('No image returned');
+  }
 
   onProgress?.(100, 'success');
-  console.log(`[imageGen/gemini] Done! slotId=${slotId}`);
+  console.log(`[imageGen] Done! slotId=${slotId}`);
 
-  return imageUrl;
+  return data.imageUrl;
 }

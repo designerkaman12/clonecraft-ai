@@ -34,43 +34,27 @@ export default function LeftPanel() {
 
   const { inputs } = session;
 
-  // Product image upload state
+  // Product image state — stored as base64, no upload needed
   const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
-  const [productImageUrl, setProductImageUrl]         = useState<string | null>(null);
-  const [uploadingImage, setUploadingImage]           = useState(false);
+  const uploadingImage = false;  // No upload needed
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleProductImageUpload = async (file: File) => {
+  const handleProductImageUpload = (file: File) => {
     if (!file.type.startsWith('image/')) { alert('Please upload an image file.'); return; }
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       const base64 = e.target?.result as string;
       setProductImagePreview(base64);
-      setUploadingImage(true);
-      try {
-        const res = await axios.post('/api/upload-image', {
-          base64Data: base64,
-          fileName: file.name,
-        });
-        if (res.data.success) {
-          setProductImageUrl(res.data.imageUrl);
-          console.log('[upload] Product image hosted at:', res.data.imageUrl);
-        } else {
-          console.warn('[upload] Failed:', res.data.error);
-          // Still use base64 preview, generation will be text-to-image
-        }
-      } catch (err) {
-        console.warn('[upload] Upload error, will use text-to-image fallback');
-      } finally {
-        setUploadingImage(false);
-      }
+      // Store base64 directly in the store — used by Canvas compositor
+      setInput('productImageBase64', base64);
+      console.log('[upload] Product image stored as base64, ready for Canvas compositing');
     };
     reader.readAsDataURL(file);
   };
 
   const clearProductImage = () => {
     setProductImagePreview(null);
-    setProductImageUrl(null);
+    setInput('productImageBase64', undefined as any);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -162,7 +146,7 @@ export default function LeftPanel() {
               inputs.aspectRatio || '1:1',
               slot.id,
               undefined,
-              productImageUrl || undefined   // ← pass product reference image
+              inputs.productImageBase64 || undefined   // ← pass base64 for Canvas compositing
             );
             useStore.getState().updateImageSlot(slot.id, { status: 'done', imageUrl });
             // Auto-select first completed image
@@ -242,7 +226,7 @@ export default function LeftPanel() {
             <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 4 }}>(for consistent product)</span>
           </label>
 
-          {productImagePreview ? (
+              {productImagePreview ? (
             <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
               <img
                 src={productImagePreview}
@@ -264,22 +248,11 @@ export default function LeftPanel() {
               >
                 <X size={11} />
               </button>
-              {uploadingImage && (
-                <div style={{
-                  position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.8)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  borderRadius: 8, fontSize: 11, color: 'var(--text-muted)',
-                }}>
-                  <Loader2 size={14} className="spin" style={{ marginRight: 4 }} /> Uploading...
-                </div>
-              )}
-              {productImageUrl && !uploadingImage && (
-                <div style={{
-                  fontSize: 9, color: '#16a34a', marginTop: 3, textAlign: 'center',
-                }}>
-                  ✓ Image ready — AI will use your actual product
-                </div>
-              )}
+              <div style={{
+                fontSize: 9, color: '#16a34a', marginTop: 3, textAlign: 'center', fontWeight: 600,
+              }}>
+                ✓ Product image ready — Canvas will composite Amazon-style layout
+              </div>
             </div>
           ) : (
             <div

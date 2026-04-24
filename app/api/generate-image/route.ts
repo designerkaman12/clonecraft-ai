@@ -6,88 +6,98 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const maxDuration = 120;
 
 /**
- * POST /api/generate-image        → generates image via Gemini, returns { imageUrl (data URL) }
- * POST /api/generate-image?poll=1 → Gemini is sync, returns { done: true } immediately
+ * POST /api/generate-image
+ * Body: { prompt, aspectRatio, slotId, productImageBase64?, slotType?, overlayConfig? }
+ *
+ * Strategy:
+ * - If productImageBase64 provided:
+ *     → Return it as-is for the frontend Canvas compositor to create the Amazon-style layout
+ * - If no product image:
+ *     → Use Gemini text-to-image to generate a scene
  */
 export async function POST(req: NextRequest) {
   const isPoll = req.nextUrl.searchParams.get('poll') === '1';
   return isPoll ? handlePoll(req) : handleStart(req);
 }
 
-// ─── Generate image via Gemini 2.5 Flash Image ───────────────────────────────
 async function handleStart(req: NextRequest) {
   try {
-    const { prompt, aspectRatio, slotId } = await req.json();
+    const { prompt, aspectRatio, slotId, productImageBase64 } = await req.json();
 
     if (!prompt?.trim()) {
       return NextResponse.json({ success: false, error: 'Prompt is required' }, { status: 400 });
     }
-    if (!GEMINI_KEY) {
-      return NextResponse.json({ success: false, error: 'GEMINI_API_KEY not configured' }, { status: 500 });
-    }
 
-    // Build a high-quality product photography prompt
-    const finalPrompt = `${prompt.trim().substring(0, 1800)}. Professional product photography, clean composition, high quality, sharp details, commercial grade.`;
+    console.log(`[generate-image] START slot=${slotId} hasProductImage=${!!productImageBase64}`);
 
-    console.log(`[generate-image] Gemini image gen START slot=${slotId}`);
+    let imageUrl: string;
 
-    const res = await fetch(
-      `${GEMINI_BASE}/models/gemini-2.5-flash-image:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: finalPrompt }] }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-        }),
+    if (productImageBase64) {
+      // ── Use uploaded product image directly ──────────────────────────────────
+      // The frontend Canvas compositor will handle the text/layout overlay
+      // This ensures the ACTUAL product is always shown, not a random AI-generated one
+      imageUrl = productImageBase64;
+      console.log(`[generate-image] Using uploaded product image for slot=${slotId}`);
+    } else {
+      // ── No product image → Gemini text-to-image ──────────────────────────────
+      if (!GEMINI_KEY) {
+        return NextResponse.json({ success: false, error: 'GEMINI_API_KEY not configured' }, { status: 500 });
       }
-    );
-
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Gemini image gen error ${res.status}: ${err.substring(0, 300)}`);
+      imageUrl = await generateTextToImage(prompt, aspectRatio);
+      console.log(`[generate-image] Gemini text-to-image SUCCESS slot=${slotId}`);
     }
-
-    const data = await res.json();
-    const parts = data?.candidates?.[0]?.content?.parts ?? [];
-    const imgPart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
-
-    if (!imgPart) {
-      // Log text response if any
-      const textPart = parts.find((p: any) => p.text);
-      throw new Error(`No image in Gemini response. Text: ${textPart?.text?.substring(0, 200) ?? 'none'}`);
-    }
-
-    const { mimeType, data: b64 } = imgPart.inlineData;
-    const imageUrl = `data:${mimeType};base64,${b64}`;
-
-    console.log(`[generate-image] Gemini SUCCESS slot=${slotId} mime=${mimeType}`);
 
     return NextResponse.json({
       success: true,
-      taskId: `gemini_${Date.now()}`,
-      imageUrl,       // data URL — browser can display directly
+      taskId: `gen_${Date.now()}`,
+      imageUrl,
       slotId,
-      done: true,     // no polling needed
+      done: true,
     });
 
   } catch (error: any) {
-    console.error('[generate-image] Gemini error:', error?.message);
+    console.error('[generate-image] error:', error?.message);
     return NextResponse.json({ success: false, error: error?.message }, { status: 500 });
   }
 }
 
-// ─── Poll (not needed for Gemini — kept for API compat) ──────────────────────
+// ─── Gemini Text-to-Image (fallback when no product photo) ───────────────────
+async function generateTextToImage(prompt: string, aspectRatio = '1:1'): Promise<string> {
+  const finalPrompt = `Professional Amazon product listing photo. ${prompt.trim().substring(0, 1500)}. Clean white background, studio lighting, sharp details, photorealistic, 4K quality, commercial grade.`;
+
+  const res = await fetch(
+    `${GEMINI_BASE}/models/gemini-2.5-flash-image:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: finalPrompt }] }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini image gen error ${res.status}: ${err.substring(0, 300)}`);
+  }
+
+  const data = await res.json();
+  const parts = data?.candidates?.[0]?.content?.parts ?? [];
+  const imgPart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
+
+  if (!imgPart) throw new Error('No image returned from Gemini');
+
+  const { mimeType, data: b64 } = imgPart.inlineData;
+  return `data:${mimeType};base64,${b64}`;
+}
+
+// ─── Poll (not needed — kept for API compat) ──────────────────────────────────
 async function handlePoll(req: NextRequest) {
   try {
     const { imageUrl, slotId } = await req.json();
-    if (imageUrl) {
-      return NextResponse.json({ success: true, done: true, imageUrl, slotId });
-    }
-    return NextResponse.json({
-      success: false, done: true,
-      error: 'Gemini is synchronous — imageUrl should have been returned in the initial request.',
-    });
+    if (imageUrl) return NextResponse.json({ success: true, done: true, imageUrl, slotId });
+    return NextResponse.json({ success: false, done: true, error: 'No imageUrl provided' });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error?.message }, { status: 500 });
   }
